@@ -1,13 +1,15 @@
-// Configuración del cliente. Editá estos tres valores con los tuyos.
+// Configuración del frontend.
 //
-// SUPABASE_URL y SUPABASE_ANON_KEY los encontrás en
-//   Supabase → Project Settings → API
+// El backend ahora es un Google Apps Script asociado a una Google Sheet en
+// tu Drive (ver apps-script/Code.gs y README.md). Acá va la URL pública de
+// la app web y el token compartido.
 //
-// ADMIN_PASSWORD es la misma contraseña que cargaste en la tabla
-//   app_config del schema.sql. Se valida del lado del servidor en cada
-//   RPC, así que cambiarla acá sin actualizarla en Supabase no sirve.
+// El token NO es un secreto fuerte (queda en el navegador), pero evita que
+// cualquier persona que encuentre la URL de Apps Script pueda escribir en
+// tu hoja. Para protección real, la validación fuerte vive del lado del
+// Apps Script (chequear código contra estudiantes.csv + hoja "completados"
+// para evitar duplicados).
 window.APP_CONFIG = {
-  SUPABASE_URL: "https://xlpyfqkupnemyakirzhz.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhscHlmcWt1cG5lbXlha2lyemh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzY0MjYsImV4cCI6MjA5MjExMjQyNn0.k_I5fG9PtN6GEXwpPBkvz_2BfIgc-bg8DjU3x2pvOn4",
-  ADMIN_PASSWORD: "elpepe3893"
+  APPS_SCRIPT_URL:   "PEGAR_URL_DE_APPS_SCRIPT_AQUI",
+  APPS_SCRIPT_TOKEN: "PEGAR_MISMO_TOKEN_QUE_EN_APPS_SCRIPT",
 };

@@ -1,142 +1,133 @@
-# Sociogramas (HTML/JS + Supabase + GitHub Pages)
+# Sociogramas (HTML/JS + CSV + Google Sheet)
 
-App estática (sin build) que sirve sociogramas para clases. El front es
-HTML + JS plano publicado en GitHub Pages, y la base de datos vive en
-[Supabase](https://supabase.com) (Postgres + RPC).
+App estática (sin build) para correr sociogramas en clase. Todo el
+front es HTML + JS plano publicado en GitHub Pages.
 
-- **Estudiantes**: ingresan con su código, responden el cuestionario y
-  quedan bloqueados al finalizar (no pueden volver a responder).
-- **Docente**: gestiona clases, sube planilla de estudiantes en CSV,
-  abre / cierra cuestionarios, ve respuestas y arma grupos con drag &
-  drop. Acceso protegido por contraseña compartida.
+- **Input**: CSVs en la carpeta `data/` (preguntas, opciones, flujos,
+  estudiantes). Se editan con Excel / Google Sheets / cualquier editor.
+- **Backend**: un Google Apps Script corto que recibe las respuestas por
+  POST y las anexa a una Google Sheet en tu Drive.
+- **Output**: la propia Google Sheet — abrís "Archivo → Descargar →
+  Microsoft Excel (.xlsx)" o directo "Abrir con Excel" desde Drive.
 
 ## Estructura
 
 ```
 index.html               Login del estudiante (código)
-cuestionario.html        Cuestionario con progreso en localStorage
-admin-login.html         Login admin (contraseña)
-admin.html               Panel del docente: clases, CSV, cuestionarios
-dashboard.html           Sociograma + estadísticas + armado de grupos
+cuestionario.html        Cuestionario
 css/styles.css
 js/
-  config.js              ⚠️ Editar: URL Supabase + anon key + password
-  supabase.js            Cliente y helpers
+  config.js              ⚠️ Editar: URL del Apps Script + token
   utils.js               CSV, toast, helpers DOM
+  api.js                 Carga de CSVs y POST al Apps Script
   cuestionario.js
-  admin.js
-  dashboard.js
-supabase/schema.sql      Schema completo + RLS + RPC + semilla
-.nojekyll                Indica a GitHub Pages que no procese con Jekyll
-.github/workflows/pages.yml  Deploy automático a Pages
+data/
+  estudiantes.csv        codigo,nombre,clase
+  preguntas.csv          numero,texto,tipo
+  opciones.csv           numero_pregunta,orden,texto
+  flujos.csv             numero_pregunta,opcion_orden,siguiente_pregunta
+  README.md              Detalle del esquema de cada CSV
+apps-script/
+  Code.gs                Backend que corre en script.google.com
 ```
 
 ## Setup
 
-### 1. Crear el proyecto en Supabase
+### 1. Crear la Google Sheet de respuestas
 
-1. Crear un proyecto nuevo en https://supabase.com.
-2. En **SQL Editor → New query**, pegar todo el contenido de
-   `supabase/schema.sql` y ejecutarlo. Esto crea tablas, RLS, RPCs,
-   semilla de preguntas y la contraseña inicial del admin.
-3. **Cambiar la contraseña por defecto** (`cambiame`). Editá la última
-   línea del archivo antes de ejecutarlo, o corré:
+1. En tu Drive, **Nuevo → Google Sheets**, poné un nombre (ej:
+   `Sociogramas - respuestas`).
+2. Copiar el ID: en la URL, es la parte entre `/d/` y `/edit`.
 
-   ```sql
-   update app_config
-      set value = crypt('TU_PASSWORD_FUERTE', gen_salt('bf'))
-    where key = 'admin_password_hash';
-   ```
+### 2. Pegar el Apps Script
 
-4. En **Project Settings → API** copiá:
-   - `Project URL`
-   - `anon public` key
+1. Ir a https://script.google.com → **Nuevo proyecto**.
+2. Borrar `Code.gs` de ejemplo y pegar el contenido de
+   `apps-script/Code.gs` de este repo.
+3. Editar el bloque `CONFIG` al principio del archivo:
+   - `SHEET_ID`: el ID copiado en el paso anterior.
+   - `TOKEN`: una cadena larga y aleatoria (ej:
+     `openssl rand -hex 24`). Este mismo valor va en `js/config.js`.
+   - `ESTUDIANTES_URL` (opcional pero recomendado): URL "raw" del
+     `estudiantes.csv` en GitHub. Formato:
+     `https://raw.githubusercontent.com/USUARIO/REPO/BRANCH/data/estudiantes.csv`.
+     Si se completa, el Apps Script valida que el código exista en el CSV
+     antes de registrar la respuesta.
+4. **Guardar** (💾). La primera vez te pedirá autorizar el script a
+   acceder a Sheets y a URL Fetch.
+5. **Implementar → Nuevo implementación** → tipo **Aplicación web**.
+   - *Ejecutar como*: **Yo** (tu cuenta).
+   - *Quién tiene acceso*: **Cualquiera**.
+   - Implementar → copiar la URL `.../exec`.
 
-### 2. Configurar el front
+> Cada vez que modifiques `Code.gs` tenés que hacer *Implementar → Administrar
+> implementaciones → editar → Versión nueva*. Si no, la URL sigue apuntando
+> al código viejo.
 
-Editá `js/config.js` y completá:
+### 3. Configurar el front
+
+Editar `js/config.js`:
 
 ```js
 window.APP_CONFIG = {
-  SUPABASE_URL: "https://xxx.supabase.co",
-  SUPABASE_ANON_KEY: "eyJhbGciOi...",
-  ADMIN_PASSWORD: "TU_PASSWORD_FUERTE"
+  APPS_SCRIPT_URL:   "https://script.google.com/macros/s/AKfycb.../exec",
+  APPS_SCRIPT_TOKEN: "el-mismo-token-que-en-apps-script",
 };
 ```
 
-> ⚠️ La anon key y la contraseña quedan visibles en el navegador. La
-> seguridad real está en Postgres: las RPC SECURITY DEFINER validan
-> contraseña y las RLS bloquean accesos directos a las tablas. Aun así,
-> tratá la contraseña como compartida entre todos los docentes.
-
-### 3. Probar localmente
-
-GitHub Pages necesita que las URLs sean servidas por HTTP, no `file://`.
-Para probar local:
+### 4. Probar local
 
 ```bash
-# Cualquier servidor estático sirve, por ejemplo:
 python3 -m http.server 8080
+# abrir http://localhost:8080
 ```
 
-Luego abrí http://localhost:8080.
+Usar un código del `data/estudiantes.csv` (ej: `JUAN001`) para entrar.
 
-### 4. Publicar en GitHub Pages
+### 5. Publicar en GitHub Pages
 
-Opción A — automático con el workflow incluido:
+**Settings → Pages → Source → Deploy from a branch** (rama `main`,
+carpeta `/`). El sitio queda en `https://USUARIO.github.io/REPO/`.
 
-1. Pusheá la rama (ej. `main`).
-2. En GitHub: **Settings → Pages → Source → GitHub Actions**.
-3. El workflow `.github/workflows/pages.yml` publica el sitio entero.
+## Cómo gestionar preguntas, flujos y estudiantes
 
-Opción B — manual:
+Editar los CSVs en `data/` (ver `data/README.md` para el detalle de
+cada columna) y hacer commit. No hay panel de admin: los cambios viajan
+por git.
 
-1. **Settings → Pages → Source → Deploy from a branch** (rama `main`,
-   carpeta `/`).
+Para cambiar la lista de alumnos:
 
-El sitio queda en `https://USUARIO.github.io/REPO/`.
+1. Abrir `data/estudiantes.csv` (en Excel, Google Sheets, o un editor de
+   texto).
+2. Agregar/quitar filas. Commit + push.
+3. Los alumnos ven los cambios al recargar (se hace cache-busting con un
+   query string).
 
-## Flujo de uso
+## Cómo ver las respuestas
 
-1. **Docente** entra a `/admin-login.html`, crea una clase,
-   sube un CSV con columnas `nombre,codigo_estudiante` y crea un
-   cuestionario. Esto asigna el cuestionario a todos los alumnos.
-2. **Estudiante** entra a `/`, escribe su código, lee instrucciones y
-   responde. El progreso se guarda en `localStorage` por si se
-   interrumpe.
-3. Al finalizar, el alumno envía las respuestas con un único RPC
-   (`submit_respuestas`) que valida server-side que no haya respondido
-   antes y marca al alumno como completado.
-4. **Docente** abre `/dashboard.html`, ve el sociograma, las
-   estadísticas y arma grupos con drag & drop.
+- Abrí la Google Sheet configurada. La pestaña **`respuestas`** tiene una
+  fila por cada respuesta enviada (con timestamp, código, nombre, clase,
+  pregunta y opción).
+- La pestaña **`completados`** registra qué alumnos ya enviaron (el Apps
+  Script usa esto para bloquear reenvíos).
+- Para bajarlo como Excel: **Archivo → Descargar → Microsoft Excel
+  (.xlsx)**.
 
-## Importar estudiantes
+## Seguridad (qué protege, qué no)
 
-CSV mínimo (UTF-8):
+- El `APPS_SCRIPT_TOKEN` queda en el navegador, así que no es un secreto
+  fuerte; evita que un bot aleatorio que encuentre la URL pueda escribir.
+- El Apps Script valida:
+  - Que el `token` coincida.
+  - (Opcional, con `ESTUDIANTES_URL`) que el `codigo` exista en el CSV.
+  - Que el `codigo` no haya enviado antes (hoja `completados`).
+- Las respuestas viven en tu Google Sheet — solo vos (y a quien compartas
+  la hoja) podés leerlas.
 
-```csv
-nombre,codigo_estudiante
-Juan Pérez,JUAN001
-María García,MARIA002
-```
+## Sistema anterior (obsoleto)
 
-El admin permite "reemplazar todos" o ir agregando.
-
-## Seguridad: lo que cubre el schema
-
-- RLS habilitada en todas las tablas. `anon` solo puede leer
-  `pregunta` y `opcion_pregunta`.
-- Todo lo demás se accede vía RPCs `SECURITY DEFINER` que requieren la
-  contraseña del admin (excepto `login_estudiante` y
-  `submit_respuestas`, que son las únicas operaciones públicas).
-- `submit_respuestas` corre en transacción: valida estado del
-  cuestionario, valida que el estudiante no haya completado, inserta
-  todas las respuestas y marca al alumno completado.
-- `admin_*` validan la contraseña con `crypt()` (bcrypt) contra
-  `app_config.admin_password_hash`.
-
-## Borrar / migrar datos antiguos (opcional)
-
-Si vienés del proyecto Hasura/Next, los CSVs del repo
-(`export_public_*.csv`) sirven solo como referencia histórica.
-Podés borrarlos cuando quieras.
+Los archivos `admin-login.html`, `admin.html`, `dashboard.html`,
+`js/admin.js`, `js/dashboard.js`, `js/supabase.js` y la carpeta
+`supabase/` pertenecen a la versión anterior basada en Supabase. Quedan
+en el repo como referencia pero **no forman parte del flujo actual**.
+Pueden borrarse sin romper nada.

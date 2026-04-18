@@ -1,21 +1,20 @@
-// Cuestionario del estudiante.
+// Cuestionario del estudiante (versión CSV + Google Apps Script).
 //
 // Flujo:
-//   1. Login por código → carga compañeros, cuestionario y preguntas
-//   2. Pantalla de instrucciones
-//   3. Pregunta de afinidad (1) por cada compañero, con sub-pregunta
-//      (2/3/4 según verde/amarillo/rojo, ninguna para blanco)
-//   4. Preguntas adicionales (5..10) seleccionando compañeros
-//   5. Submit atómico vía RPC → bloquea al estudiante
+//   1. Login por código (contra data/estudiantes.csv) → compañeros de la misma clase.
+//   2. Pantalla de instrucciones.
+//   3. Pregunta de afinidad (tipo AFINIDAD) por cada compañero, con
+//      sub-pregunta MULTIPLE según lo que diga data/flujos.csv.
+//   4. Preguntas de tipo SELECCION_COMPANEROS, una a una (checkboxes).
+//   5. Submit al Apps Script → escribe filas en la Google Sheet.
 //
 // Las respuestas parciales se guardan en localStorage con la clave
-// "cuest:" + codigo, así si el navegador se cierra el alumno retoma.
+// "cuest:" + codigo por si se corta el navegador.
 
 (function () {
   const codigo = U.getQueryParam("codigo");
-  const $ = U.$, $$ = U.$$, el = U.el;
+  const $ = U.$, el = U.el;
   const STATE_KEY = codigo ? `cuest:${codigo}` : null;
-
   const root = $("#cuestionario-root");
 
   if (!codigo) {
@@ -23,74 +22,63 @@
     return;
   }
 
-  // ------- Estado en memoria -------
-  let session = null;          // { estudiante, clase, cuestionario, companeros }
-  let preguntas = [];          // todas las preguntas (1..10)
-  let opciones = [];           // todas las opciones
-  let opcionesPorPregunta = {};
+  // Estado cargado desde los CSVs.
+  let estudiante = null;
+  let companeros = [];
+  let preguntas = [];
+  let opcionesPorNumero = {};         // { 1: [ {orden, texto}, ... ] }
+  let flujoPorPreguntaYOrden = {};    // { "1|1": 2, "1|2": 3, ... }
   let preguntaPorNumero = {};
 
-  // Estado del cuestionario (persistido en localStorage)
+  // Estado persistido en localStorage:
   // {
   //   step: "instrucciones" | "afinidad" | "adicionales" | "finalizado",
   //   indiceCompanero: 0,
   //   indiceAdicional: 0,
-  //   afinidad: { [companeroId]: { opcionId, sub: { [opcionExtraId]: true }, otroTexto } },
-  //   adicionales: { [preguntaId]: [companeroId, ...] }
+  //   afinidad: { [codigoCompa]: { opcionOrden, sub: { [ordenSub]: true }, otroTexto } },
+  //   adicionales: { [numeroPregunta]: [codigoCompa, ...] }
   // }
   let estado = U.lsGet(STATE_KEY, null) || {
     step: "instrucciones",
     indiceCompanero: 0,
     indiceAdicional: 0,
     afinidad: {},
-    adicionales: {}
+    adicionales: {},
   };
 
   function persist() { U.lsSet(STATE_KEY, estado); }
 
-  // ------- Boot -------
   init().catch(err => {
     console.error(err);
-    root.innerHTML = '<div class="panel-container"><p>Error cargando el cuestionario. Intentá de nuevo.</p></div>';
+    root.innerHTML = '<div class="panel-container"><p>Error cargando el cuestionario. Revisá la consola.</p></div>';
   });
 
   async function init() {
     root.innerHTML = '<div class="panel-container"><p>Cargando…</p></div>';
-    const [loginRes, prRes] = await Promise.all([
-      SB.rpc("login_estudiante", { p_codigo: codigo }),
-      SB.loadPreguntas()
-    ]);
-    if (!loginRes || !loginRes.ok) {
-      root.innerHTML = '<div class="panel-container"><p>Estudiante no encontrado o sin cuestionario asignado. <a href="./index.html">Volver al inicio</a>.</p></div>';
+    const r = await API.login(codigo);
+    if (!r.ok) {
+      root.innerHTML = '<div class="panel-container"><p>Estudiante no encontrado. <a href="./index.html">Volver al inicio</a>.</p></div>';
       return;
     }
-    session = loginRes;
-    preguntas = prRes.preguntas;
-    opciones = prRes.opciones;
+    estudiante = r.estudiante;
+    companeros = r.companeros;
+    preguntas  = r.preguntas;
 
-    preguntas.forEach(p => preguntaPorNumero[p.numero_pregunta] = p);
-    opciones.forEach(op => {
-      (opcionesPorPregunta[op.pregunta_id] = opcionesPorPregunta[op.pregunta_id] || []).push(op);
+    preguntas.forEach(p => preguntaPorNumero[p.numero] = p);
+    r.opciones.forEach(op => {
+      (opcionesPorNumero[op.numero_pregunta] = opcionesPorNumero[op.numero_pregunta] || []).push(op);
     });
-    Object.values(opcionesPorPregunta).forEach(arr => arr.sort((a,b)=>(a.orden||0)-(b.orden||0)));
+    r.flujos.forEach(f => {
+      flujoPorPreguntaYOrden[`${f.numero_pregunta}|${f.opcion_orden}`] = f.siguiente_pregunta;
+    });
 
-    if (session.estudiante.completado) {
-      U.lsDel(STATE_KEY);
-      renderFinalizado(true);
-      return;
-    }
-    if (!session.cuestionario || session.cuestionario.estado !== "ACTIVA") {
-      root.innerHTML = '<div class="panel-container"><p>El cuestionario está cerrado.</p></div>';
-      return;
-    }
     render();
   }
 
-  // ------- Render principal -------
   function header() {
     return el("div", { class: "panel-estudiante-title" }, [
-      `Estudiante: ${session.estudiante.nombre}`,
-      el("span", { class: "clase" }, "Clase: " + (session.clase?.identificador || "—"))
+      `Estudiante: ${estudiante.nombre}`,
+      el("span", { class: "clase" }, "Clase: " + (estudiante.clase || "—")),
     ]);
   }
 
@@ -103,9 +91,9 @@
     if (estado.step === "finalizado")    return renderFinalizado();
   }
 
-  // ------- Pantalla 1: instrucciones -------
+  // ---------- Pantalla 1: instrucciones ----------
   function renderInstrucciones() {
-    const cont = el("div", { class: "panel-container" }, []);
+    const cont = el("div", { class: "panel-container" });
     cont.innerHTML = `
       <h2 class="panel-form-title">Instrucciones</h2>
       <div style="margin-top:12px;line-height:1.5">
@@ -130,16 +118,18 @@
     });
   }
 
-  // ------- Pantalla 2: afinidad por compañero -------
+  // ---------- Pantalla 2: afinidad por compañero ----------
+  function preguntasAfinidad() {
+    return preguntas.filter(p => p.tipo === "AFINIDAD");
+  }
+
   function renderAfinidad() {
-    const companeros = session.companeros;
-    if (!companeros.length) {
-      // Saltear directamente a adicionales
+    const preg = preguntasAfinidad()[0];
+    if (!preg || !companeros.length) {
       estado.step = "adicionales";
       estado.indiceAdicional = 0;
       persist(); return render();
     }
-
     if (estado.indiceCompanero >= companeros.length) {
       estado.step = "adicionales";
       estado.indiceAdicional = 0;
@@ -147,13 +137,12 @@
     }
 
     const compa = companeros[estado.indiceCompanero];
-    const preg1 = preguntaPorNumero[1];
-    const ops1 = opcionesPorPregunta[preg1.id] || [];
-    const datoCompa = estado.afinidad[compa.id] || { opcionId: "", sub: {}, otroTexto: "" };
+    const ops = opcionesPorNumero[preg.numero] || [];
+    const dato = estado.afinidad[compa.codigo] || { opcionOrden: null, sub: {}, otroTexto: "" };
 
     const cont = el("div", { class: "panel-container" });
     cont.appendChild(progressBar(estado.indiceCompanero, companeros.length));
-    cont.appendChild(el("p", { class: "cuestionario-pregunta-texto" }, preg1.texto));
+    cont.appendChild(el("p", { class: "cuestionario-pregunta-texto" }, preg.texto));
 
     const centro = el("div", { class: "cuestionario-centro" });
     centro.appendChild(el("div", { class: "cuestionario-nombre-estudiante" }, compa.nombre));
@@ -161,66 +150,56 @@
     const selectorWrap = el("div", { class: "cuestionario-opciones-container" });
     const select = el("select", { class: "cuestionario-select" });
     select.appendChild(el("option", { value: "" }, "Seleccioná una opción"));
-    ops1.forEach(op => {
-      const c = U.colorOpcionAfinidad(op.texto_opcion);
-      const o = el("option", { value: op.id, class: c.cls }, `${c.icon} ${op.texto_opcion}`);
-      if (op.id === datoCompa.opcionId) o.selected = true;
+    ops.forEach(op => {
+      const c = U.colorOpcionAfinidad(op.texto);
+      const o = el("option", { value: String(op.orden), class: c.cls }, `${c.icon} ${op.texto}`);
+      if (op.orden === dato.opcionOrden) o.selected = true;
       select.appendChild(o);
     });
     select.addEventListener("change", () => {
-      datoCompa.opcionId = select.value;
-      datoCompa.sub = {};
-      datoCompa.otroTexto = "";
-      estado.afinidad[compa.id] = datoCompa;
+      dato.opcionOrden = select.value ? parseInt(select.value, 10) : null;
+      dato.sub = {};
+      dato.otroTexto = "";
+      estado.afinidad[compa.codigo] = dato;
       persist(); renderAfinidad();
     });
     selectorWrap.appendChild(select);
     centro.appendChild(selectorWrap);
 
-    // Sub-pregunta según color
-    const opSeleccionada = ops1.find(o => o.id === datoCompa.opcionId);
-    let subNumero = null;
-    if (opSeleccionada) {
-      const c = U.colorOpcionAfinidad(opSeleccionada.texto_opcion).key;
-      if (c === "verde")    subNumero = 2;
-      if (c === "amarillo") subNumero = 3;
-      if (c === "rojo")     subNumero = 4;
-    }
-    if (subNumero) {
-      const pSub = preguntaPorNumero[subNumero];
+    // Sub-pregunta según flujo
+    const siguiente = dato.opcionOrden
+      ? flujoPorPreguntaYOrden[`${preg.numero}|${dato.opcionOrden}`]
+      : null;
+    if (siguiente) {
+      const pSub = preguntaPorNumero[siguiente];
       if (pSub) {
-        const subOps = opcionesPorPregunta[pSub.id] || [];
+        const subOps = opcionesPorNumero[pSub.numero] || [];
         const subWrap = el("div", { class: "cuestionario-pregunta-extra" }, pSub.texto);
         const ul = el("div", { class: "cuestionario-opciones-extra" });
         subOps.forEach(op => {
           const item = el("div", { class: "cuestionario-opcion-item" });
           const lbl = el("label", { class: "cuestionario-opcion-label" });
-          const cb = el("input", {
-            type: "checkbox",
-            class: "cuestionario-checkbox"
-          });
-          cb.checked = !!datoCompa.sub[op.id];
+          const cb = el("input", { type: "checkbox", class: "cuestionario-checkbox" });
+          cb.checked = !!dato.sub[op.orden];
           cb.addEventListener("change", () => {
-            if (cb.checked) datoCompa.sub[op.id] = true;
-            else delete datoCompa.sub[op.id];
-            estado.afinidad[compa.id] = datoCompa;
-            persist();
-            // re-render por si "Otro motivo" cambió
-            renderAfinidad();
+            if (cb.checked) dato.sub[op.orden] = true;
+            else delete dato.sub[op.orden];
+            estado.afinidad[compa.codigo] = dato;
+            persist(); renderAfinidad();
           });
           lbl.appendChild(cb);
-          lbl.appendChild(document.createTextNode(" " + op.texto_opcion));
+          lbl.appendChild(document.createTextNode(" " + op.texto));
           item.appendChild(lbl);
-          if (/otro motivo/i.test(op.texto_opcion) && datoCompa.sub[op.id]) {
+          if (/otro motivo/i.test(op.texto) && dato.sub[op.orden]) {
             const inp = el("input", {
               type: "text",
               placeholder: "Especificá el motivo…",
               class: "cuestionario-otro-motivo",
-              value: datoCompa.otroTexto || ""
+              value: dato.otroTexto || "",
             });
             inp.addEventListener("input", () => {
-              datoCompa.otroTexto = inp.value;
-              estado.afinidad[compa.id] = datoCompa;
+              dato.otroTexto = inp.value;
+              estado.afinidad[compa.codigo] = dato;
               persist();
             });
             item.appendChild(inp);
@@ -237,13 +216,16 @@
 
     const navBtns = el("div", { class: "flex-row", style: "justify-content:center" });
     if (estado.indiceCompanero > 0) {
-      navBtns.appendChild(el("button", { class: "btn btn-gray", onclick: () => {
-        estado.indiceCompanero--; persist(); render();
-      }}, "Atrás"));
+      navBtns.appendChild(el("button", {
+        class: "btn btn-gray",
+        onclick: () => { estado.indiceCompanero--; persist(); render(); },
+      }, "Atrás"));
     }
     const ultimo = estado.indiceCompanero >= companeros.length - 1;
-    navBtns.appendChild(el("button", { class: "btn", onclick: () => avanzarAfinidad(error, ultimo) },
-      ultimo ? "Continuar" : "Siguiente"));
+    navBtns.appendChild(el("button", {
+      class: "btn",
+      onclick: () => avanzarAfinidad(error, ultimo),
+    }, ultimo ? "Continuar" : "Siguiente"));
     centro.appendChild(navBtns);
     centro.appendChild(el("div", { class: "cuestionario-contador" },
       `${estado.indiceCompanero + 1} de ${companeros.length}`));
@@ -253,24 +235,19 @@
   }
 
   function avanzarAfinidad(errEl, ultimo) {
-    const compa = session.companeros[estado.indiceCompanero];
-    const dato = estado.afinidad[compa.id];
-    if (!dato || !dato.opcionId) {
+    const compa = companeros[estado.indiceCompanero];
+    const dato = estado.afinidad[compa.codigo];
+    if (!dato || !dato.opcionOrden) {
       errEl.textContent = "Tenés que seleccionar una opción.";
       errEl.classList.remove("hidden");
       return;
     }
-    // Validar sub-pregunta si tiene "Otro motivo" marcado sin texto
-    const op1 = (opcionesPorPregunta[preguntaPorNumero[1].id] || []).find(o => o.id === dato.opcionId);
-    const c = op1 ? U.colorOpcionAfinidad(op1.texto_opcion).key : "";
-    let subNum = null;
-    if (c === "verde") subNum = 2;
-    if (c === "amarillo") subNum = 3;
-    if (c === "rojo") subNum = 4;
-    if (subNum) {
-      const pSub = preguntaPorNumero[subNum];
-      const subOps = opcionesPorPregunta[pSub.id] || [];
-      const otraMarcada = subOps.find(o => /otro motivo/i.test(o.texto_opcion) && dato.sub[o.id]);
+    const preg = preguntasAfinidad()[0];
+    const siguiente = flujoPorPreguntaYOrden[`${preg.numero}|${dato.opcionOrden}`];
+    if (siguiente) {
+      const pSub = preguntaPorNumero[siguiente];
+      const subOps = opcionesPorNumero[pSub.numero] || [];
+      const otraMarcada = subOps.find(o => /otro motivo/i.test(o.texto) && dato.sub[o.orden]);
       if (otraMarcada && !(dato.otroTexto || "").trim()) {
         errEl.textContent = "Especificá el motivo si seleccionaste 'Otro motivo'.";
         errEl.classList.remove("hidden");
@@ -286,25 +263,18 @@
     persist(); render();
   }
 
-  // ------- Pantalla 3: preguntas adicionales (5..10) -------
+  // ---------- Pantalla 3: preguntas adicionales (SELECCION_COMPANEROS) ----------
   function preguntasAdicionales() {
-    return preguntas
-      .filter(p => p.numero_pregunta >= 5 && p.tipo_pregunta === "MULTIPLE_SELECCION")
-      .sort((a,b) => a.numero_pregunta - b.numero_pregunta);
+    return preguntas.filter(p => p.tipo === "SELECCION_COMPANEROS");
   }
 
   function renderAdicionales() {
     const arr = preguntasAdicionales();
-    if (!arr.length) {
-      // Si no hay preguntas adicionales, finalizamos directamente
-      return submitAll();
-    }
-    if (estado.indiceAdicional >= arr.length) {
-      return submitAll();
-    }
+    if (!arr.length) return submitAll();
+    if (estado.indiceAdicional >= arr.length) return submitAll();
+
     const preg = arr[estado.indiceAdicional];
-    const seleccionados = estado.adicionales[preg.id] || [];
-    const companeros = session.companeros;
+    const seleccionados = estado.adicionales[preg.numero] || [];
 
     const cont = el("div", { class: "panel-container" });
     cont.appendChild(progressBar(estado.indiceAdicional, arr.length));
@@ -322,19 +292,19 @@
         const cb = el("input", {
           type: "checkbox",
           class: "cuestionario-estudiante-checkbox",
-          id: "ad-" + c.id
+          id: "ad-" + c.codigo,
         });
-        cb.checked = seleccionados.includes(c.id);
+        cb.checked = seleccionados.includes(c.codigo);
         cb.addEventListener("change", () => {
-          let cur = estado.adicionales[preg.id] || [];
-          if (cb.checked) cur = Array.from(new Set([...cur, c.id]));
-          else cur = cur.filter(id => id !== c.id);
-          estado.adicionales[preg.id] = cur;
+          let cur = estado.adicionales[preg.numero] || [];
+          if (cb.checked) cur = Array.from(new Set([...cur, c.codigo]));
+          else cur = cur.filter(x => x !== c.codigo);
+          estado.adicionales[preg.numero] = cur;
           persist();
         });
         const lbl = el("label", {
-          for: "ad-" + c.id,
-          class: "cuestionario-estudiante-label"
+          for: "ad-" + c.codigo,
+          class: "cuestionario-estudiante-label",
         }, c.nombre);
         item.appendChild(cb); item.appendChild(lbl);
         list.appendChild(item);
@@ -345,21 +315,28 @@
 
     const navBtns = el("div", { class: "flex-row mt-16", style: "justify-content:center" });
     if (estado.indiceAdicional > 0) {
-      navBtns.appendChild(el("button", { class: "btn btn-gray", onclick: () => {
-        estado.indiceAdicional--; persist(); render();
-      }}, "Atrás"));
+      navBtns.appendChild(el("button", {
+        class: "btn btn-gray",
+        onclick: () => { estado.indiceAdicional--; persist(); render(); },
+      }, "Atrás"));
     } else {
-      navBtns.appendChild(el("button", { class: "btn btn-gray", onclick: () => {
-        estado.step = "afinidad";
-        estado.indiceCompanero = Math.max(0, session.companeros.length - 1);
-        persist(); render();
-      }}, "Atrás"));
+      navBtns.appendChild(el("button", {
+        class: "btn btn-gray",
+        onclick: () => {
+          estado.step = "afinidad";
+          estado.indiceCompanero = Math.max(0, companeros.length - 1);
+          persist(); render();
+        },
+      }, "Atrás"));
     }
     const esUltima = estado.indiceAdicional >= arr.length - 1;
-    navBtns.appendChild(el("button", { class: esUltima ? "btn" : "btn", onclick: () => {
-      if (esUltima) confirmarFinalizar();
-      else { estado.indiceAdicional++; persist(); render(); }
-    }}, esUltima ? "Finalizar y enviar" : "Siguiente"));
+    navBtns.appendChild(el("button", {
+      class: "btn",
+      onclick: () => {
+        if (esUltima) confirmarFinalizar();
+        else { estado.indiceAdicional++; persist(); render(); }
+      },
+    }, esUltima ? "Finalizar y enviar" : "Siguiente"));
     cont.appendChild(navBtns);
     cont.appendChild(el("div", { class: "cuestionario-contador text-center" },
       `Pregunta ${estado.indiceAdicional + 1} de ${arr.length}`));
@@ -368,7 +345,7 @@
   }
 
   function progressBar(i, n) {
-    const pct = Math.round(((i) / Math.max(1, n)) * 100);
+    const pct = Math.round((i / Math.max(1, n)) * 100);
     const bar = el("div", { class: "progress-bar" });
     bar.appendChild(el("span", { style: `width:${pct}%` }));
     return bar;
@@ -379,79 +356,89 @@
     submitAll();
   }
 
-  // ------- Submit atómico -------
+  // ---------- Submit al Apps Script ----------
   async function submitAll() {
     root.innerHTML = "";
     root.appendChild(header());
     root.appendChild(el("div", { class: "panel-container text-center" },
       el("p", null, "Enviando respuestas…")));
 
-    // Construir array de respuestas
     const respuestas = [];
-    const preg1 = preguntaPorNumero[1];
+    const pregAfi = preguntasAfinidad()[0];
+    const companerosPorCodigo = {};
+    companeros.forEach(c => companerosPorCodigo[c.codigo] = c);
 
-    Object.entries(estado.afinidad || {}).forEach(([compaId, d]) => {
-      if (!d || !d.opcionId) return;
-      respuestas.push({
-        pregunta_id: preg1.id,
-        estudiante_evaluado_id: compaId,
-        opcion_pregunta_id: d.opcionId,
-        otro_texto: null
-      });
-      // sub-pregunta
-      const op1 = (opcionesPorPregunta[preg1.id] || []).find(o => o.id === d.opcionId);
-      if (!op1) return;
-      const c = U.colorOpcionAfinidad(op1.texto_opcion).key;
-      let subNum = null;
-      if (c === "verde") subNum = 2;
-      if (c === "amarillo") subNum = 3;
-      if (c === "rojo") subNum = 4;
-      if (!subNum) return;
-      const pSub = preguntaPorNumero[subNum];
-      if (!pSub) return;
-      const subOps = opcionesPorPregunta[pSub.id] || [];
-      Object.keys(d.sub || {}).forEach(opId => {
-        if (!d.sub[opId]) return;
-        const op = subOps.find(o => o.id === opId);
+    // Afinidad + sub-preguntas
+    if (pregAfi) {
+      const opsAfi = opcionesPorNumero[pregAfi.numero] || [];
+      Object.entries(estado.afinidad || {}).forEach(([compaCod, d]) => {
+        if (!d || !d.opcionOrden) return;
+        const op = opsAfi.find(o => o.orden === d.opcionOrden);
         if (!op) return;
-        let otroTxt = null;
-        if (/otro motivo/i.test(op.texto_opcion)) {
-          otroTxt = (d.otroTexto || "").trim() || null;
-          if (!otroTxt) return; // no guardamos "otro motivo" sin texto
-        }
+        const compa = companerosPorCodigo[compaCod];
+        if (!compa) return;
         respuestas.push({
-          pregunta_id: pSub.id,
-          estudiante_evaluado_id: compaId,
-          opcion_pregunta_id: opId,
-          otro_texto: otroTxt
+          numero_pregunta: pregAfi.numero,
+          texto_pregunta: pregAfi.texto,
+          evaluado_codigo: compa.codigo,
+          evaluado_nombre: compa.nombre,
+          opcion_texto: op.texto,
+          otro_texto: "",
+        });
+        const siguiente = flujoPorPreguntaYOrden[`${pregAfi.numero}|${d.opcionOrden}`];
+        if (!siguiente) return;
+        const pSub = preguntaPorNumero[siguiente];
+        if (!pSub) return;
+        const subOps = opcionesPorNumero[pSub.numero] || [];
+        Object.keys(d.sub || {}).forEach(ordenStr => {
+          if (!d.sub[ordenStr]) return;
+          const op2 = subOps.find(o => String(o.orden) === String(ordenStr));
+          if (!op2) return;
+          let otroTxt = "";
+          if (/otro motivo/i.test(op2.texto)) {
+            otroTxt = (d.otroTexto || "").trim();
+            if (!otroTxt) return;
+          }
+          respuestas.push({
+            numero_pregunta: pSub.numero,
+            texto_pregunta: pSub.texto,
+            evaluado_codigo: compa.codigo,
+            evaluado_nombre: compa.nombre,
+            opcion_texto: op2.texto,
+            otro_texto: otroTxt,
+          });
         });
       });
-    });
+    }
 
-    Object.entries(estado.adicionales || {}).forEach(([pregId, ids]) => {
-      (ids || []).forEach(compaId => {
+    // Adicionales (SELECCION_COMPANEROS)
+    Object.entries(estado.adicionales || {}).forEach(([numStr, cods]) => {
+      const preg = preguntaPorNumero[parseInt(numStr, 10)];
+      if (!preg) return;
+      (cods || []).forEach(compaCod => {
+        const compa = companerosPorCodigo[compaCod];
+        if (!compa) return;
         respuestas.push({
-          pregunta_id: pregId,
-          estudiante_evaluado_id: compaId,
-          opcion_pregunta_id: null,
-          otro_texto: null
+          numero_pregunta: preg.numero,
+          texto_pregunta: preg.texto,
+          evaluado_codigo: compa.codigo,
+          evaluado_nombre: compa.nombre,
+          opcion_texto: "",
+          otro_texto: "",
         });
       });
     });
 
     try {
-      const res = await SB.rpc("submit_respuestas", {
-        p_codigo: codigo,
-        p_respuestas: respuestas
-      });
+      const res = await API.submitRespuestas({ estudiante, respuestas });
       if (!res || !res.ok) {
         const map = {
           ya_completado: "Este código ya envió sus respuestas.",
-          cuestionario_cerrado: "El cuestionario ya está cerrado.",
           codigo_invalido: "Código de estudiante inválido.",
-          sin_cuestionario: "No tenés cuestionario asignado."
+          forbidden: "El token del front no coincide con el del Apps Script.",
+          sin_respuestas: "No hay respuestas para enviar.",
         };
-        const msg = map[res && res.error] || "No se pudieron guardar las respuestas.";
+        const msg = (res && map[res.error]) || "No se pudieron guardar las respuestas.";
         root.querySelector(".panel-container").innerHTML =
           `<p class="cuestionario-error">${U.escapeHtml(msg)}</p>
            <div class="text-center mt-16"><a class="btn" href="./index.html">Volver al inicio</a></div>`;
@@ -468,18 +455,14 @@
     }
   }
 
-  function renderFinalizado(yaEstaba) {
+  function renderFinalizado() {
     root.innerHTML = "";
     root.appendChild(header());
     const cont = el("div", { class: "panel-container cuestionario-finalizado" });
-    cont.innerHTML = yaEstaba
-      ? `<h2 class="cuestionario-titulo-finalizado">Ya completaste este cuestionario</h2>
-         <p class="mb-16">Tus respuestas fueron registradas el
-           ${new Date(session.estudiante.completado_at).toLocaleString()}.</p>
-         <a class="btn" href="./index.html">Volver al inicio</a>`
-      : `<h2 class="cuestionario-titulo-finalizado">¡Completaste el cuestionario!</h2>
-         <p class="mb-16">Gracias por tu participación. Tus respuestas se enviaron correctamente.</p>
-         <a class="btn" href="./index.html">Volver al inicio</a>`;
+    cont.innerHTML = `
+      <h2 class="cuestionario-titulo-finalizado">¡Completaste el cuestionario!</h2>
+      <p class="mb-16">Gracias por tu participación. Tus respuestas se enviaron correctamente.</p>
+      <a class="btn" href="./index.html">Volver al inicio</a>`;
     root.appendChild(cont);
   }
 })();

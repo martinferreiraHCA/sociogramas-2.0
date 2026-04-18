@@ -1,0 +1,27 @@
+numero_pregunta,orden,texto
+1,1,Verde
+1,2,Amarillo
+1,3,Rojo
+1,4,Blanco
+2,1,Participa en todo momento del trabajo
+2,2,Escucha cuando otros hablan
+2,3,Siempre cumple con lo que le toca
+2,4,Ayuda cuando alguien se tranca
+2,5,Me hace sentir cómodo/a en el grupo
+2,6,Propone ideas claras para avanzar
+2,7,Se mantiene tranquilo/a y respeta a todos
+2,8,Motiva a los demás a seguir o concentrarse
+2,9,Deja participar a todos sin imponerse
+2,10,Otro motivo
+3,1,Hace lo que le toca solo si se lo dicen
+3,2,Se dispersa mucho
+3,3,Le cuesta tomar decisiones o hablar en grupo
+3,4,Depende de su humor o del día
+3,5,A veces domina demasiado pero igual trabajamos bien
+3,6,Otro motivo
+4,1,No cumple con lo que le toca
+4,2,Interrumpe o desconcentra
+4,3,No respeta opiniones ajenas
+4,4,Genera conflictos
+4,5,No participa
+4,6,Otro motivo
