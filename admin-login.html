@@ -18,10 +18,9 @@
     <a href="./index.html" class="login-link">Volver al ingreso de estudiante</a>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./js/config.js"></script>
   <script src="./js/utils.js"></script>
-  <script src="./js/supabase.js"></script>
+  <script src="./js/api.js"></script>
   <script>
     document.getElementById("form-admin").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -29,14 +28,15 @@
       const btn = document.getElementById("btn-entrar");
       btn.disabled = true; btn.textContent = "Verificando…";
       try {
-        const r = await SB.rpc("admin_check", { p_password: pw });
+        const r = await API.adminCheck(pw);
         if (r && r.ok) {
           sessionStorage.setItem("admin_pw", pw);
-          window.location.href = "./admin.html";
+          window.location.href = "./dashboard.html";
         } else {
           U.toast("Contraseña incorrecta", "error");
         }
       } catch (err) {
+        console.error(err);
         U.toast("Error verificando la contraseña", "error");
       } finally {
         btn.disabled = false; btn.textContent = "Entrar";

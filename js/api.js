@@ -112,8 +112,64 @@
     return await r.json();
   }
 
+  async function adminCheck(pw) {
+    const url = cfg.APPS_SCRIPT_URL + "?action=admin_check&pw=" + encodeURIComponent(pw);
+    const r = await fetch(url, { redirect: "follow" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  }
+
+  async function fetchRespuestas(pw) {
+    const url = cfg.APPS_SCRIPT_URL + "?action=respuestas&pw=" + encodeURIComponent(pw);
+    const r = await fetch(url, { redirect: "follow" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  }
+
+  async function fetchCompletados(pw) {
+    const url = cfg.APPS_SCRIPT_URL + "?action=completados&pw=" + encodeURIComponent(pw);
+    const r = await fetch(url, { redirect: "follow" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  }
+
+  async function fetchGrupos(pw, clase) {
+    let url = cfg.APPS_SCRIPT_URL + "?action=grupos&pw=" + encodeURIComponent(pw);
+    if (clase) url += "&clase=" + encodeURIComponent(clase);
+    const r = await fetch(url, { redirect: "follow" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  }
+
+  async function saveGrupos(pw, clase, grupos) {
+    const body = JSON.stringify({
+      action: "save_grupos",
+      token_admin: pw,
+      clase,
+      grupos,
+    });
+    const r = await fetch(cfg.APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body,
+      redirect: "follow",
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  }
+
   // Para cache-busting cuando el docente edita CSVs en el repo sin esperar el bust del fetch.
   function clearCache() { cache = null; }
 
-  window.API = { loadAll, login, submitRespuestas, clearCache };
+  window.API = {
+    loadAll,
+    login,
+    submitRespuestas,
+    adminCheck,
+    fetchRespuestas,
+    fetchCompletados,
+    fetchGrupos,
+    saveGrupos,
+    clearCache,
+  };
 })();

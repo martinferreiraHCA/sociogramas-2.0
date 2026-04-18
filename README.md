@@ -124,10 +124,62 @@ Para cambiar la lista de alumnos:
 - Las respuestas viven en tu Google Sheet — solo vos (y a quien compartas
   la hoja) podés leerlas.
 
+## Dashboard del docente
+
+`admin-login.html` pide contraseña (la que configuraste en
+`apps-script/Code.gs` como `ADMIN_PASSWORD`). Después redirige a
+`dashboard.html`, que trae:
+
+- Resumen (completados, conteos de afinidad por color).
+- Sociograma (grafo circular con flechas coloreadas según la pregunta 1).
+- Detalle por estudiante (respuestas recibidas por cada alumno).
+- **Armado de grupos automático**: botón "Generar automático" que corre
+  un algoritmo sociométrico (ver sección siguiente). Los grupos se
+  pueden editar con drag&drop y guardar. Al guardar, se escriben en
+  la pestaña `grupos` de la misma Google Sheet.
+
+## Algoritmo de armado de grupos
+
+Implementado en `js/groups.js`. Se apoya en literatura de sociometría,
+aprendizaje cooperativo y composición de equipos:
+
+- **Moreno (1934)** – test sociométrico: las elecciones declaradas
+  predicen cohesión y conflicto en el grupo real.
+- **Coie & Dodge (1988)** – peer nomination: categorías
+  (popular / rechazado / aislado / controvertido) requieren tratamientos
+  distintos en el armado.
+- **Johnson & Johnson (1999)** – cooperative learning: grupos
+  heterogéneos funcionan mejor cuando la tarea exige interdependencia.
+- **Salas, Stagl & Burke (2004)** – composición de equipos: tamaño
+  óptimo 3–5 para tareas colaborativas escolares.
+- **Kernighan & Lin (1970)** – partición de grafos por swaps: base del
+  refinamiento iterativo.
+
+El problema es NP-duro (agrupamiento con peso sujeto a restricciones);
+el algoritmo usa un esquema heurístico en 4 fases:
+
+1. **Matriz de afinidad dirigida**: verde=+3, amarillo=+1, rojo=−5,
+   pregunta 5 ("ayudan")=+1, pregunta 6 ("sentir parte")=+1,
+   pregunta 10 ("cuesta")=−2.
+2. **Score de pares** simétrico con bonificaciones por reciprocidad:
+   verde mutuo +2, rojo mutuo −5 (además del peso base).
+3. **Seeds**: los alumnos más vulnerables (altos en pregunta 8 "sin
+   grupo" y 9 "necesita apoyo", o con muchos rojos recibidos y pocos
+   verdes) se siembran en grupos distintos.
+4. **Inserción greedy** del resto, priorizando opiniones más polarizadas.
+   Restricción dura configurable: no permitir rojos mutuos dentro del
+   mismo grupo. Restricciones blandas: distribuir líderes
+   (pregunta 7) y apoyos (pregunta 9) entre grupos.
+5. **Búsqueda local por swaps** (Kernighan-Lin simplificado): intercambia
+   pares entre grupos si el swap mejora la cohesión total, iterando
+   hasta llegar a un óptimo local.
+
+El dashboard muestra el score total, cuántos rojos mutuos quedaron y
+qué alumnos fueron marcados como aislados.
+
 ## Sistema anterior (obsoleto)
 
-Los archivos `admin-login.html`, `admin.html`, `dashboard.html`,
-`js/admin.js`, `js/dashboard.js`, `js/supabase.js` y la carpeta
-`supabase/` pertenecen a la versión anterior basada en Supabase. Quedan
-en el repo como referencia pero **no forman parte del flujo actual**.
-Pueden borrarse sin romper nada.
+Los archivos `js/admin.js` y `js/supabase.js` y la carpeta `supabase/`
+pertenecen a la versión anterior basada en Supabase. Quedan en el repo
+como referencia pero **no forman parte del flujo actual**. Se pueden
+borrar sin romper nada.
