@@ -161,7 +161,7 @@
       dato.sub = {};
       dato.otroTexto = "";
       estado.afinidad[compa.codigo] = dato;
-      persist(); renderAfinidad();
+      persist(); render();
     });
     selectorWrap.appendChild(select);
     centro.appendChild(selectorWrap);
@@ -185,7 +185,7 @@
             if (cb.checked) dato.sub[op.orden] = true;
             else delete dato.sub[op.orden];
             estado.afinidad[compa.codigo] = dato;
-            persist(); renderAfinidad();
+            persist(); render();
           });
           lbl.appendChild(cb);
           lbl.appendChild(document.createTextNode(" " + op.texto));
