@@ -26,7 +26,7 @@ const CONFIG = {
   // Sirve para validar que el código existe antes de registrar.
   // Si la dejás vacía, no se valida contra el CSV (menos seguro).
   // Cambiá `main` por la rama correcta cuando corresponda.
-  ESTUDIANTES_URL: "https://raw.githubusercontent.com/martinferreiraHCA/sociogramas-2.0/main/data/estudiantes.csv",
+  ESTUDIANTES_URL: "https://raw.githubusercontent.com/martinferreiraHCA/sociogramas-2.0/claude/csv-quiz-excel-export-CXa8Z/data/estudiantes.csv",
 };
 
 const HOJA_RESPUESTAS = "respuestas";
