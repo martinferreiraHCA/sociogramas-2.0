@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sociogramas – Acceso administrador</title>
+  <link rel="stylesheet" href="./css/styles.css" />
+  <link rel="icon" href="./public/icon.png" />
+</head>
+<body>
+  <div class="login">
+    <h2>Acceso administrador</h2>
+    <form id="form-admin">
+      <label for="pw">Contraseña</label>
+      <input id="pw" type="password" required autocomplete="current-password" />
+      <button type="submit" class="btn" id="btn-entrar">Entrar</button>
+    </form>
+    <a href="./index.html" class="login-link">Volver al ingreso de estudiante</a>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./js/config.js"></script>
+  <script src="./js/utils.js"></script>
+  <script src="./js/supabase.js"></script>
+  <script>
+    document.getElementById("form-admin").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const pw = document.getElementById("pw").value;
+      const btn = document.getElementById("btn-entrar");
+      btn.disabled = true; btn.textContent = "Verificando…";
+      try {
+        const r = await SB.rpc("admin_check", { p_password: pw });
+        if (r && r.ok) {
+          sessionStorage.setItem("admin_pw", pw);
+          window.location.href = "./admin.html";
+        } else {
+          U.toast("Contraseña incorrecta", "error");
+        }
+      } catch (err) {
+        U.toast("Error verificando la contraseña", "error");
+      } finally {
+        btn.disabled = false; btn.textContent = "Entrar";
+      }
+    });
+  </script>
+</body>
+</html>

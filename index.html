@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sociogramas – Ingreso</title>
+  <link rel="stylesheet" href="./css/styles.css" />
+  <link rel="icon" href="./public/icon.png" />
+</head>
+<body>
+  <div class="login">
+    <h2>Ingrese su código de estudiante</h2>
+    <form id="form-login">
+      <label for="codigo">Código de estudiante</label>
+      <input id="codigo" type="text" placeholder="Tu código…" required autocomplete="off" />
+      <button type="submit" class="btn" id="btn-entrar">Continuar</button>
+    </form>
+    <a href="./admin-login.html" class="login-link">O ingresá como administrador para gestionar los cuestionarios</a>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./js/config.js"></script>
+  <script src="./js/utils.js"></script>
+  <script src="./js/supabase.js"></script>
+  <script>
+    document.getElementById("form-login").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const codigo = document.getElementById("codigo").value.trim();
+      const btn = document.getElementById("btn-entrar");
+      if (!codigo) return;
+      btn.disabled = true; btn.textContent = "Buscando…";
+      try {
+        const r = await SB.rpc("login_estudiante", { p_codigo: codigo });
+        if (!r || !r.ok) {
+          if (r && r.error === "sin_cuestionario") {
+            U.toast("No tienes un cuestionario asignado", "warn");
+          } else {
+            U.toast("Estudiante no encontrado", "error");
+          }
+          return;
+        }
+        U.toast("Cargando cuestionario…", "success");
+        setTimeout(() => {
+          window.location.href = "./cuestionario.html?codigo=" + encodeURIComponent(codigo);
+        }, 600);
+      } catch (err) {
+        U.toast("Error al buscar el estudiante", "error");
+      } finally {
+        btn.disabled = false; btn.textContent = "Continuar";
+      }
+    });
+  </script>
+</body>
+</html>
