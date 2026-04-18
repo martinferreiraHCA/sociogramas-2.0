@@ -10,6 +10,8 @@
 // Apps Script (chequear código contra estudiantes.csv + hoja "completados"
 // para evitar duplicados).
 window.APP_CONFIG = {
+  // Completá con la URL .../exec que te da Apps Script al hacer el deploy.
   APPS_SCRIPT_URL:   "PEGAR_URL_DE_APPS_SCRIPT_AQUI",
-  APPS_SCRIPT_TOKEN: "PEGAR_MISMO_TOKEN_QUE_EN_APPS_SCRIPT",
+  // Tiene que coincidir con CONFIG.TOKEN en apps-script/Code.gs.
+  APPS_SCRIPT_TOKEN: "d7d1e6cb97cca059ffcdd126d5f4132a76e99442382f29cf",
 };
