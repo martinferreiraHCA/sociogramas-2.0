@@ -19,13 +19,14 @@
 
 const CONFIG = {
   // ID de la Google Sheet destino (la parte entre /d/ y /edit de la URL).
-  SHEET_ID: "PEGAR_SHEET_ID_ACA",
+  SHEET_ID: "1WpNz1Qj1elOq5GxEBNBGq8bOyhZw88SaRs0wx5Al76Q",
   // Token compartido con el front (js/config.js). Si no coincide, se rechaza.
-  TOKEN: "CAMBIAR_ESTE_TOKEN_POR_UNO_LARGO_Y_ALEATORIO",
+  TOKEN: "d7d1e6cb97cca059ffcdd126d5f4132a76e99442382f29cf",
   // URL cruda del estudiantes.csv en el repo (raw.githubusercontent.com/...).
   // Sirve para validar que el código existe antes de registrar.
   // Si la dejás vacía, no se valida contra el CSV (menos seguro).
-  ESTUDIANTES_URL: "",
+  // Cambiá `main` por la rama correcta cuando corresponda.
+  ESTUDIANTES_URL: "https://raw.githubusercontent.com/martinferreiraHCA/sociogramas-2.0/main/data/estudiantes.csv",
 };
 
 const HOJA_RESPUESTAS = "respuestas";
