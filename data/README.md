@@ -1,16 +1,13 @@
 # Datos del sistema (CSVs)
 
-Estos CSVs son la única fuente de configuración del cuestionario. Editalos
-con Excel / Google Sheets / cualquier editor de texto y hacé commit.
+Estos CSVs son la configuración del cuestionario (preguntas/opciones/flujos).
+Editalos con Excel / Google Sheets / cualquier editor de texto y hacé commit.
 
-## `estudiantes.csv`
-Lista de alumnos autorizados a responder. Columnas:
-
-| columna | descripción |
-|---------|-------------|
-| `codigo` | Código único con el que el alumno entra (sin espacios). |
-| `nombre` | Nombre a mostrar. |
-| `clase`  | Grupo/curso. Los compañeros son los alumnos con la misma `clase` (excepto uno mismo). |
+> **Nota:** el listado de estudiantes y sus códigos **ya no está acá**.
+> Ahora vive en la Google Sheet: una hoja por clase (nombre del tab = nombre
+> de la clase) con columnas `Nombre` y `Código`. Desde el dashboard, el
+> botón **Generar códigos** completa los códigos vacíos. El archivo
+> `estudiantes.csv` queda en el repo sólo como ejemplo histórico.
 
 ## `preguntas.csv`
 Lista de preguntas, ordenadas por `numero`. Columnas:
@@ -42,3 +39,7 @@ Columnas:
 | `numero_pregunta` | Pregunta que dispara el flujo (típicamente 1). |
 | `opcion_orden` | `orden` de la opción elegida en `opciones.csv`. |
 | `siguiente_pregunta` | `numero` de la sub-pregunta a mostrar. Vacío = no se muestra nada. |
+
+## `estudiantes.csv` (legado)
+Formato original antes de la migración a Google Sheets. Se mantiene como
+referencia de los datos de prueba, pero el sistema **no** lo lee.
