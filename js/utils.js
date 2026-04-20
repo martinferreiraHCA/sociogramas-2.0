@@ -175,6 +175,7 @@
     const iCurso = firstIdx("curso");
     const iGrupo = firstIdx("grupo");
     const iTipoDoc = firstIdx("tipo de documento");
+    const iConPase = firstIdx("con pase");
 
     const vistos = new Set();
     const out = [];
@@ -204,12 +205,15 @@
       }
       if (!nombre) continue;
 
+      const conPase = iConPase >= 0 ? String(row[iConPase] || "").trim().toUpperCase() : "";
       out.push({
         codigo: ci,
         nombre,
         curso: iCurso >= 0 ? String(row[iCurso] || "").trim() : "",
         grupo: iGrupo >= 0 ? String(row[iGrupo] || "").trim() : "",
         tipoDoc,
+        conPase,
+        activo: conPase !== "SI",
       });
     }
     return { headerIdx, rows: out };
