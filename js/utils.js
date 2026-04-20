@@ -147,10 +147,97 @@
     return { icon: "", cls: "", key: "" };
   }
 
+  // ----- Roster escolar (CSV institucional) -----
+  // Lee un CSV con el formato de exportación del colegio (encabezados en la
+  // 3ra fila aprox., columnas `Documento` = CI y `Nombre` + `Primer Apellido`
+  // + ...) y devuelve [{codigo, nombre, curso, grupo}] con el CI como código
+  // y el nombre prolijo "Nombre Apellido".
+  function parseRosterEscolar(csvText) {
+    const rows = parseCSV(csvText);
+    if (!rows.length) return { headerIdx: -1, rows: [] };
+
+    // Encontrar fila de encabezados: contiene "Documento" y "Nombre".
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(15, rows.length); i++) {
+      const r = rows[i].map(c => (c || "").trim().toLowerCase());
+      if (r.includes("documento") && r.includes("nombre")) { headerIdx = i; break; }
+    }
+    if (headerIdx < 0) return { headerIdx: -1, rows: [] };
+
+    const headers = rows[headerIdx].map(c => (c || "").trim().toLowerCase());
+    const firstIdx = (name) => headers.indexOf(name);
+    const iDoc = firstIdx("documento");
+    const iNombre = firstIdx("nombre");
+    const iPrimerNombre   = firstIdx("primer nombre");
+    const iSegundoNombre  = firstIdx("segundo nombre");
+    const iPrimerApellido = firstIdx("primer apellido");
+    const iSegundoApellido= firstIdx("segundo apellido");
+    const iCurso = firstIdx("curso");
+    const iGrupo = firstIdx("grupo");
+    const iTipoDoc = firstIdx("tipo de documento");
+
+    const vistos = new Set();
+    const out = [];
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.every(c => !String(c || "").trim())) continue;
+
+      const tipoDoc = iTipoDoc >= 0 ? String(row[iTipoDoc] || "").trim().toUpperCase() : "";
+      const ciRaw = iDoc >= 0 ? String(row[iDoc] || "").trim() : "";
+      // Sólo dígitos; si hay letra (ej. pasaporte) lo dejamos tal cual limpio.
+      const ci = /^\d/.test(ciRaw) ? ciRaw.replace(/\D/g, "") : ciRaw.replace(/\s+/g, "");
+      if (!ci) continue;
+      if (vistos.has(ci)) continue;
+      vistos.add(ci);
+
+      let nombre = "";
+      if (iPrimerNombre >= 0 && iPrimerApellido >= 0) {
+        const pn = titleCase(row[iPrimerNombre]);
+        const sn = iSegundoNombre >= 0 ? titleCase(row[iSegundoNombre]) : "";
+        const pa = titleCase(row[iPrimerApellido]);
+        const sa = iSegundoApellido >= 0 ? titleCase(row[iSegundoApellido]) : "";
+        nombre = [pn, sn, pa, sa].filter(Boolean).join(" ");
+      }
+      if (!nombre && iNombre >= 0) {
+        // Fallback: "APELLIDO APELLIDO Nombre Nombre" → reordenar a "Nombre Apellido".
+        nombre = normalizarNombreApellidosCapsPrimero(String(row[iNombre] || "").trim());
+      }
+      if (!nombre) continue;
+
+      out.push({
+        codigo: ci,
+        nombre,
+        curso: iCurso >= 0 ? String(row[iCurso] || "").trim() : "",
+        grupo: iGrupo >= 0 ? String(row[iGrupo] || "").trim() : "",
+        tipoDoc,
+      });
+    }
+    return { headerIdx, rows: out };
+  }
+
+  function titleCase(s) {
+    const str = String(s == null ? "" : s).trim();
+    if (!str) return "";
+    return str.toLowerCase().replace(/(^|\s|-|')(\p{L})/gu, (_, sep, ch) => sep + ch.toUpperCase());
+  }
+
+  // "ADINOLFI LLACH Ignacio Tomás" → "Ignacio Tomás Adinolfi Llach".
+  function normalizarNombreApellidosCapsPrimero(s) {
+    const tokens = String(s).trim().split(/\s+/);
+    const apellidos = [], nombres = [];
+    for (const t of tokens) {
+      if (!t) continue;
+      if (/^[\p{Lu}'\-]+$/u.test(t)) apellidos.push(titleCase(t));
+      else nombres.push(titleCase(t));
+    }
+    return [...nombres, ...apellidos].join(" ").trim();
+  }
+
   window.U = {
     toast, lsGet, lsSet, lsDel,
     $, $$, el,
     parseCSV, csvToObjects, objectsToCSV, downloadFile,
-    getQueryParam, escapeHtml, colorOpcionAfinidad
+    getQueryParam, escapeHtml, colorOpcionAfinidad,
+    parseRosterEscolar, titleCase,
   };
 })();

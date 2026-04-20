@@ -131,6 +131,15 @@
   async function eliminarEstudiante(pw, clase, codigo) {
     return await postJSON({ action: "eliminar_estudiante", token_admin: pw, clase, codigo });
   }
+  async function importarEstudiantes(pw, clase, estudiantes, modo) {
+    return await postJSON({
+      action: "importar_estudiantes",
+      token_admin: pw,
+      clase,
+      estudiantes: estudiantes || [],
+      modo: modo || "merge",
+    });
+  }
 
   // ---- Helpers HTTP ----
   // Enmascara credenciales para no imprimirlas en consola.
@@ -215,6 +224,7 @@
     agregarEstudiante,
     generarCodigos,
     eliminarEstudiante,
+    importarEstudiantes,
     clearCache,
   };
 })();
