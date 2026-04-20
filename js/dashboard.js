@@ -159,7 +159,11 @@
     U.toast("Creando clase…", "info");
     try {
       const r = await API.crearClase(pw, nombre.trim(), []);
-      if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+      if (!r || !r.ok) {
+        console.error("crear_clase falló:", r);
+        U.toast("Error: " + ((r && r.error) || "desconocido") + " · mirá la consola", "error");
+        return;
+      }
       U.toast("Clase creada", "success");
       API.clearCache();
       claseSel = nombre.trim();
@@ -168,8 +172,8 @@
       history.replaceState(null, "", url);
       await init();
     } catch (err) {
-      console.error(err);
-      U.toast("Error de conexión", "error");
+      console.error("crear_clase error de red:", err);
+      U.toast("Error de conexión: " + (err.message || err), "error");
     }
   }
 
@@ -256,10 +260,17 @@
       U.toast("Generando códigos…", "info");
       try {
         const r = await API.generarCodigos(pw, claseSel);
-        if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+        if (!r || !r.ok) {
+          console.error("generar_codigos falló:", r);
+          U.toast("Error: " + ((r && r.error) || "desconocido") + " · mirá la consola", "error");
+          return;
+        }
         U.toast(`Listo. ${r.generados} código(s) generado(s)`, "success");
         await refrescar();
-      } catch (err) { console.error(err); U.toast("Error de conexión", "error"); }
+      } catch (err) {
+        console.error("generar_codigos error de red:", err);
+        U.toast("Error de conexión: " + (err.message || err), "error");
+      }
     });
 
     c.querySelector("#btn-add-est").addEventListener("click", async () => {
@@ -267,10 +278,17 @@
       if (!nombre || !nombre.trim()) return;
       try {
         const r = await API.agregarEstudiante(pw, claseSel, nombre.trim());
-        if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+        if (!r || !r.ok) {
+          console.error("agregar_estudiante falló:", r);
+          U.toast("Error: " + ((r && r.error) || "desconocido") + " · mirá la consola", "error");
+          return;
+        }
         U.toast("Estudiante agregado", "success");
         await refrescar();
-      } catch (err) { console.error(err); U.toast("Error de conexión", "error"); }
+      } catch (err) {
+        console.error("agregar_estudiante error de red:", err);
+        U.toast("Error de conexión: " + (err.message || err), "error");
+      }
     });
 
     c.querySelector("#btn-copy-codigos").addEventListener("click", () => {
@@ -293,10 +311,17 @@
     if (!confirm(`¿Eliminar a ${est.nombre} (${est.codigo}) de la clase ${claseSel}?`)) return;
     try {
       const r = await API.eliminarEstudiante(pw, claseSel, est.codigo);
-      if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+      if (!r || !r.ok) {
+        console.error("eliminar_estudiante falló:", r);
+        U.toast("Error: " + ((r && r.error) || "desconocido") + " · mirá la consola", "error");
+        return;
+      }
       U.toast("Eliminado", "success");
       await refrescar();
-    } catch (err) { console.error(err); U.toast("Error de conexión", "error"); }
+    } catch (err) {
+      console.error("eliminar_estudiante error de red:", err);
+      U.toast("Error de conexión: " + (err.message || err), "error");
+    }
   }
 
   async function refrescar() {
