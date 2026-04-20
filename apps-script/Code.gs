@@ -18,6 +18,7 @@
  *     body { action: "agregar_estudiante", token_admin, clase, nombre }
  *     body { action: "generar_codigos", token_admin, clase }
  *     body { action: "eliminar_estudiante", token_admin, clase, codigo }
+ *     body { action: "importar_estudiantes", token_admin, clase, estudiantes:[{codigo,nombre}], modo }
  *
  *   GET /exec
  *     ?action=ping                              → healthcheck (público)
@@ -86,6 +87,7 @@ function doPost(e) {
       case "agregar_estudiante":   return agregarEstudiante(body);
       case "generar_codigos":      return generarCodigos(body);
       case "eliminar_estudiante":  return eliminarEstudiante(body);
+      case "importar_estudiantes": return importarEstudiantes(body);
       default:                     return submitRespuestas(body);
     }
   } catch (err) {
@@ -219,6 +221,92 @@ function eliminarEstudiante(body) {
   }
   invalidarCacheLogin();
   return jsonResponse({ ok: true, borrados });
+}
+
+function importarEstudiantes(body) {
+  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const clase = String(body.clase || "").trim();
+  if (!clase) return jsonResponse({ ok: false, error: "clase_vacia" });
+  if (esHojaReservada(clase)) return jsonResponse({ ok: false, error: "nombre_reservado" });
+
+  const estudiantes = Array.isArray(body.estudiantes) ? body.estudiantes : [];
+  const modo = String(body.modo || "merge").toLowerCase();
+  const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+
+  // Índice global de códigos → clase, para detectar conflictos cross-clase.
+  const usadosGlobal = {};
+  ss.getSheets().forEach((h) => {
+    const n = h.getName();
+    if (esHojaReservada(n)) return;
+    try { mapaColumnasClase(h); } catch (e) { return; }
+    leerEstudiantesClase(ss, n).forEach((e) => {
+      if (e.codigo) usadosGlobal[e.codigo] = n;
+    });
+  });
+
+  const hoja = obtenerHojaClase(ss, clase, true);
+  const cols = mapaColumnasClase(hoja);
+
+  if (modo === "reemplazar") {
+    const last = hoja.getLastRow();
+    if (last >= 2) hoja.getRange(2, 1, last - 1, hoja.getLastColumn()).clearContent();
+  }
+
+  // Mapa código → nro fila (1-based) en la hoja actual.
+  const mapaExistente = {};
+  {
+    const last = hoja.getLastRow();
+    if (last >= 2) {
+      const v = hoja.getRange(2, 1, last - 1, hoja.getLastColumn()).getValues();
+      for (let i = 0; i < v.length; i++) {
+        const cod = String(v[i][cols.codigo] || "").trim();
+        if (cod) mapaExistente[cod] = i + 2;
+      }
+    }
+  }
+
+  let agregados = 0, actualizados = 0, conflictos = [], invalidos = 0;
+  const filasNuevas = [];
+  estudiantes.forEach((e) => {
+    const codigo = String((e && e.codigo) || "").trim();
+    const nombre = String((e && e.nombre) || "").trim();
+    if (!codigo || !nombre) { invalidos++; return; }
+
+    const duenio = usadosGlobal[codigo];
+    if (duenio && duenio !== clase) {
+      conflictos.push({ codigo, nombre, clase_actual: duenio });
+      return;
+    }
+    const filaExistente = mapaExistente[codigo];
+    if (filaExistente) {
+      // Actualizar nombre si cambió.
+      const actual = String(hoja.getRange(filaExistente, cols.nombre + 1).getValue() || "").trim();
+      if (actual !== nombre) {
+        hoja.getRange(filaExistente, cols.nombre + 1).setValue(nombre);
+        actualizados++;
+      }
+    } else {
+      const fila = new Array(hoja.getLastColumn() || 2).fill("");
+      fila[cols.nombre] = nombre;
+      fila[cols.codigo] = codigo;
+      filasNuevas.push(fila);
+      mapaExistente[codigo] = -1; // marcar como pendiente
+      usadosGlobal[codigo] = clase;
+      agregados++;
+    }
+  });
+
+  if (filasNuevas.length) {
+    const desde = hoja.getLastRow() + 1;
+    hoja.getRange(desde, 1, filasNuevas.length, filasNuevas[0].length).setValues(filasNuevas);
+  }
+
+  invalidarCacheLogin();
+  return jsonResponse({
+    ok: true, clase, agregados, actualizados, invalidos,
+    conflictos: conflictos.slice(0, 20),
+    conflictos_total: conflictos.length,
+  });
 }
 
 function generarCodigos(body) {

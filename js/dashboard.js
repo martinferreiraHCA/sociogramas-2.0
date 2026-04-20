@@ -215,14 +215,16 @@
       <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
         <h3>Estudiantes y códigos</h3>
         <div class="flex-row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn btn-green btn-sm" id="btn-importar-csv">📥 Importar CSV del colegio</button>
           <button class="btn btn-blue btn-sm" id="btn-gen-codigos" ${sinCodigo ? "" : "disabled"}>
             🔑 Generar códigos${sinCodigo ? ` (${sinCodigo} sin código)` : ""}
           </button>
           <button class="btn btn-gray btn-sm" id="btn-add-est">+ Agregar estudiante</button>
           <button class="btn btn-gray btn-sm" id="btn-copy-codigos" ${ests.length ? "" : "disabled"}>📋 Copiar CSV</button>
+          <input type="file" id="file-roster" accept=".csv,text/csv" style="display:none" />
         </div>
       </div>
-      <p class="muted mt-16">Los nombres se cargan en la planilla (tab <b>${U.escapeHtml(claseSel)}</b>, columnas <code>Nombre</code> y <code>Código</code>). Con <b>Generar códigos</b> el sistema completa los códigos vacíos sin pisar los existentes.</p>
+      <p class="muted mt-16">Los nombres se cargan en la planilla (tab <b>${U.escapeHtml(claseSel)}</b>, columnas <code>Nombre</code> y <code>Código</code>). Podés <b>importar el CSV del colegio</b> (se usan las cédulas como código) o usar <b>Generar códigos</b> para completar con códigos random los que estén vacíos.</p>
       <div id="roster-list" class="roster-list mt-16"></div>
     `;
 
@@ -300,7 +302,123 @@
       navigator.clipboard.writeText(csv).then(() => U.toast("Copiado al portapapeles", "success"));
     });
 
+    const fileInput = c.querySelector("#file-roster");
+    c.querySelector("#btn-importar-csv").addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = U.parseRosterEscolar(String(reader.result || ""));
+          if (!parsed.rows.length) {
+            U.toast("No se encontraron estudiantes válidos (¿CSV sin columna Documento/Nombre?)", "error");
+            console.warn("parseRosterEscolar:", parsed);
+            return;
+          }
+          abrirModalImportar(parsed.rows, ests);
+        } catch (err) {
+          console.error("parseRosterEscolar error", err);
+          U.toast("No se pudo leer el CSV: " + err.message, "error");
+        }
+      };
+      reader.readAsText(f, "utf-8");
+    });
+
     return c;
+  }
+
+  function abrirModalImportar(filasParseadas, estsActuales) {
+    // Marcar cuáles ya existen en la clase actual.
+    const codigosActuales = new Set(estsActuales.filter(e => e.codigo).map(e => e.codigo));
+    const nuevos = filasParseadas.filter(f => !codigosActuales.has(f.codigo)).length;
+    const yaExisten = filasParseadas.length - nuevos;
+
+    const overlay = el("div", { class: "modal-overlay", id: "modal-importar" });
+    const modal = el("div", { class: "modal-card" });
+    modal.innerHTML = `
+      <div class="modal-head">
+        <h3>Importar CSV del colegio</h3>
+        <button class="modal-close" id="modal-cerrar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="grupos-stats-grid" style="margin-bottom:14px">
+          <div class="grupos-stat grupos-stat-ok">
+            <div class="num">${nuevos}</div><div class="lbl">nuevos a importar</div>
+          </div>
+          <div class="grupos-stat grupos-stat-warn">
+            <div class="num">${yaExisten}</div><div class="lbl">ya en la clase</div>
+          </div>
+          <div class="grupos-stat">
+            <div class="num">${filasParseadas.length}</div><div class="lbl">total del archivo</div>
+          </div>
+        </div>
+        <div class="flex-row" style="gap:8px;margin-bottom:12px">
+          <label style="color:#333;margin:0"><b>Clase destino:</b></label>
+          <span class="badge badge-active">${U.escapeHtml(claseSel)}</span>
+        </div>
+        <div class="muted mb-12">Se van a usar las <b>cédulas</b> como código. Los nombres existentes se actualizan si cambiaron.</div>
+        <div class="roster-preview">
+          <div class="roster-preview-head">
+            <div>Nombre</div><div>Código (CI)</div><div>Estado</div>
+          </div>
+          <div class="roster-preview-body">
+            ${filasParseadas.slice(0, 200).map(f => `
+              <div class="roster-preview-row">
+                <div>${U.escapeHtml(f.nombre)}</div>
+                <div><code>${U.escapeHtml(f.codigo)}</code></div>
+                <div>${codigosActuales.has(f.codigo) ? '<span class="badge badge-done">ya existe</span>' : '<span class="badge badge-pending">nuevo</span>'}</div>
+              </div>
+            `).join("")}
+            ${filasParseadas.length > 200 ? `<div class="muted mt-16">(mostrando los primeros 200 de ${filasParseadas.length})</div>` : ""}
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <label class="flex-row" style="gap:6px;margin:0">
+          <input type="checkbox" id="modo-reemplazar" />
+          <span class="muted">Reemplazar roster completo de la clase (borra lo que haya)</span>
+        </label>
+        <div class="flex-row" style="gap:8px">
+          <button class="btn btn-gray" id="modal-cancel">Cancelar</button>
+          <button class="btn btn-blue" id="modal-ok">Importar ${filasParseadas.length} alumno(s)</button>
+        </div>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const cerrar = () => overlay.remove();
+    modal.querySelector("#modal-cerrar").addEventListener("click", cerrar);
+    modal.querySelector("#modal-cancel").addEventListener("click", cerrar);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) cerrar(); });
+
+    modal.querySelector("#modal-ok").addEventListener("click", async () => {
+      const modo = modal.querySelector("#modo-reemplazar").checked ? "reemplazar" : "merge";
+      const payload = filasParseadas.map(f => ({ codigo: f.codigo, nombre: f.nombre }));
+      U.toast("Importando…", "info");
+      cerrar();
+      try {
+        const r = await API.importarEstudiantes(pw, claseSel, payload, modo);
+        if (!r || !r.ok) {
+          console.error("importar_estudiantes falló:", r);
+          U.toast("Error: " + ((r && r.error) || "desconocido") + " · mirá la consola", "error");
+          return;
+        }
+        const partes = [];
+        if (r.agregados) partes.push(`${r.agregados} nuevos`);
+        if (r.actualizados) partes.push(`${r.actualizados} actualizados`);
+        if (r.conflictos_total) partes.push(`${r.conflictos_total} con conflicto`);
+        if (r.invalidos) partes.push(`${r.invalidos} inválidos`);
+        U.toast("Import OK · " + (partes.join(" · ") || "sin cambios"), "success");
+        if (r.conflictos_total) console.warn("Conflictos de códigos con otras clases:", r.conflictos);
+        await refrescar();
+      } catch (err) {
+        console.error("importar_estudiantes error de red:", err);
+        U.toast("Error de conexión: " + (err.message || err), "error");
+      }
+    });
   }
 
   async function eliminarAlumno(est) {
