@@ -20,6 +20,12 @@
   // Estado del armado de grupos.
   let gruposLocal = null;    // [{ nombre, codigos: [] }]
   let resultadoAlgoritmo = null;
+  let gruposConfig = {
+    tamGrupo: 4,
+    permitirRojoMutuo: false,
+    estrategia: "automatico",
+    prioridad: "evitar_conflictos",
+  };
 
   init().catch(err => {
     console.error(err);
@@ -99,6 +105,7 @@
     if (selNode) selNode.addEventListener("change", () => {
       claseSel = selNode.value || "";
       gruposLocal = null; resultadoAlgoritmo = null;
+      gruposConfig = { tamGrupo: 4, permitirRojoMutuo: false, estrategia: "automatico", prioridad: "evitar_conflictos" };
       const url = new URL(window.location.href);
       if (claseSel) url.searchParams.set("clase", claseSel);
       else url.searchParams.delete("clase");
@@ -317,37 +324,81 @@
       <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
         <h3>Armado de grupos</h3>
         <div class="flex-row" style="gap:8px;flex-wrap:wrap">
-          <label class="muted" style="display:flex;align-items:center;gap:6px">
-            Tamaño
-            <input id="tam-grupo" type="number" min="2" max="8" value="4" style="width:60px" />
-          </label>
-          <label class="muted" style="display:flex;align-items:center;gap:6px">
-            <input id="permitir-rojo" type="checkbox" /> Permitir rojos mutuos
-          </label>
-          <button class="btn btn-blue btn-sm" id="btn-auto">Generar automático</button>
           <button class="btn btn-gray btn-sm" id="btn-add-grupo">+ Grupo</button>
           <button class="btn btn-orange btn-sm" id="btn-reset">Reiniciar</button>
           <button class="btn" id="btn-save">Guardar</button>
         </div>
       </div>
-      <p class="muted mt-16">El botón <b>Generar automático</b> arma grupos ponderando afinidades, reciprocidades y criterios de distribución (líderes, alumnos que necesitan más apoyo, aislados). Podés ajustar a mano con drag&amp;drop.</p>
+      <p class="muted mt-16">Configurá los parámetros y presioná <b>Generar grupos</b>. El algoritmo arma grupos ponderando afinidades, reciprocidades y criterios de distribución (líderes, alumnos que necesitan más apoyo, aislados). Podés ajustar a mano con drag&amp;drop.</p>
+      <div class="grupos-config mt-16">
+        <div class="grupos-config-row">
+          <label>
+            <span>👥 Tamaño de grupo</span>
+            <select id="tam-grupo" class="cuestionario-select">
+              ${[3,4,5,6].map(n => `<option value="${n}" ${gruposConfig.tamGrupo===n?"selected":""}>${n} estudiantes</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            <span>🎯 Estrategia</span>
+            <select id="estrategia" class="cuestionario-select">
+              ${[
+                ["automatico","Automático (evita rojos)"],
+                ["balanceado","Balanceado (mix de perfiles)"],
+                ["homogeneo","Homogéneo (niveles similares)"],
+                ["inclusion","Inclusión (distribuir aislados)"],
+                ["liderazgo","Liderazgo (un referente por grupo)"],
+              ].map(([v,l]) => `<option value="${v}" ${gruposConfig.estrategia===v?"selected":""}>${l}</option>`).join("")}
+            </select>
+          </label>
+          <label>
+            <span>⚖️ Prioridad</span>
+            <select id="prioridad" class="cuestionario-select">
+              ${[
+                ["evitar_conflictos","Evitar conflictos"],
+                ["maximizar_colaboracion","Maximizar colaboración"],
+                ["desarrollar_liderazgo","Desarrollar liderazgo"],
+                ["integrar_aislados","Integrar aislados"],
+              ].map(([v,l]) => `<option value="${v}" ${gruposConfig.prioridad===v?"selected":""}>${l}</option>`).join("")}
+            </select>
+          </label>
+          <label class="grupos-config-check">
+            <input id="permitir-rojo" type="checkbox" ${gruposConfig.permitirRojoMutuo?"checked":""} />
+            <span>Permitir rojos mutuos</span>
+          </label>
+        </div>
+        <div class="grupos-config-actions">
+          <button class="btn btn-blue" id="btn-auto">🎯 Generar grupos</button>
+          <button class="btn btn-gray btn-sm" id="btn-regenerar" title="Vuelve a correr con los mismos parámetros">🔄 Regenerar</button>
+        </div>
+      </div>
+
+      <div id="grupos-compat-stats" class="grupos-compat-stats mt-16"></div>
       <div id="algo-resumen"></div>
       <div id="grupos-tablero" class="grupos-tablero mt-16"></div>
     `;
 
     const tamInp = c.querySelector("#tam-grupo");
     const rojoInp = c.querySelector("#permitir-rojo");
+    const estrInp = c.querySelector("#estrategia");
+    const prioInp = c.querySelector("#prioridad");
 
-    c.querySelector("#btn-auto").addEventListener("click", () => {
-      const tamGrupo = parseInt(tamInp.value, 10) || 4;
-      resultadoAlgoritmo = GROUPS.formarGrupos(ests, resp, opciones, {
-        tamGrupo,
+    // Stats de compatibilidad del curso (independientes de los grupos).
+    renderCompatStats(c.querySelector("#grupos-compat-stats"), ests, resp);
+
+    const generar = () => {
+      gruposConfig = {
+        tamGrupo: parseInt(tamInp.value, 10) || 4,
         permitirRojoMutuo: rojoInp.checked,
-      });
+        estrategia: estrInp.value,
+        prioridad: prioInp.value,
+      };
+      resultadoAlgoritmo = GROUPS.formarGrupos(ests, resp, opciones, gruposConfig);
       gruposLocal = resultadoAlgoritmo.grupos.map(g => ({ nombre: g.nombre, codigos: [...g.codigos] }));
       render();
       U.toast("Grupos generados", "success");
-    });
+    };
+    c.querySelector("#btn-auto").addEventListener("click", generar);
+    c.querySelector("#btn-regenerar").addEventListener("click", generar);
     c.querySelector("#btn-add-grupo").addEventListener("click", () => {
       const n = prompt("Nombre del grupo", `Grupo ${(gruposLocal?.length || 0) + 1}`);
       if (!n) return;
@@ -364,14 +415,33 @@
 
     if (resultadoAlgoritmo) {
       const res = resultadoAlgoritmo.resumen;
+      const okGrupos = resultadoAlgoritmo.grupos.filter(g => !g.warnings.length).length;
+      const warnGrupos = resultadoAlgoritmo.grupos.length - okGrupos;
       const resumen = c.querySelector("#algo-resumen");
       resumen.innerHTML = `
-        <div class="panel-container" style="padding:12px;background:#f4f9f4;margin-top:12px">
-          <b>Score total de cohesión:</b> ${res.scoreTotal.toFixed(1)} ·
-          <b>Rojos mutuos internos:</b> ${res.rojosMutuosInternos} ·
-          <b>Tamaños:</b> ${res.tamanos.join(", ")}
-          ${res.aislados.length ? `<br><span class="muted">Alumnos marcados como aislados (pregunta 8): ${res.aislados.map(U.escapeHtml).join(", ")}</span>` : ""}
-        </div>`;
+        <div class="grupos-algo-resumen">
+          <div class="grupos-algo-tile grupos-algo-ok">
+            <div class="num">${okGrupos}</div>
+            <div class="lbl">grupos sin advertencias</div>
+          </div>
+          <div class="grupos-algo-tile grupos-algo-warn">
+            <div class="num">${warnGrupos}</div>
+            <div class="lbl">con advertencias</div>
+          </div>
+          <div class="grupos-algo-tile grupos-algo-err">
+            <div class="num">${res.rojosMutuosInternos}</div>
+            <div class="lbl">rojos mutuos internos</div>
+          </div>
+          <div class="grupos-algo-tile">
+            <div class="num">${res.scoreTotal.toFixed(1)}</div>
+            <div class="lbl">score total de cohesión</div>
+          </div>
+          <div class="grupos-algo-tile">
+            <div class="num">${res.tamanos.join("·")}</div>
+            <div class="lbl">tamaños</div>
+          </div>
+        </div>
+        ${res.aislados.length ? `<div class="muted mt-16">Alumnos marcados como aislados (pregunta 8): ${res.aislados.map(U.escapeHtml).join(", ")}</div>` : ""}`;
     }
 
     const tablero = c.querySelector("#grupos-tablero");
@@ -392,9 +462,22 @@
   }
 
   function makeGrupoCard(g, estIdx, gruposIndex, warnings) {
-    const card = el("div", { class: "grupo-card" });
-    const head = el("div", { class: "flex-row", style: "justify-content:space-between" });
-    head.appendChild(el("h4", null, g.nombre));
+    const tieneRojoMutuo = (warnings || []).some(w => w.startsWith("Rojo mutuo"));
+    const tieneWarn = !!(warnings && warnings.length) && !tieneRojoMutuo;
+    let statusCls = "";
+    let statusLabel = "";
+    if (!g.isPool) {
+      if (tieneRojoMutuo)      { statusCls = "status-err";  statusLabel = "❌ Con incompatibilidades"; }
+      else if (tieneWarn)      { statusCls = "status-warn"; statusLabel = "⚠️ Con advertencias"; }
+      else if (g.codigos.length) { statusCls = "status-ok";   statusLabel = "✅ Compatible"; }
+    }
+    const card = el("div", { class: "grupo-card " + statusCls });
+    const head = el("div", { class: "flex-row", style: "justify-content:space-between;align-items:flex-start" });
+    const title = el("div", null, [
+      el("h4", null, `${g.nombre}${g.isPool ? "" : ` (${g.codigos.length})`}`),
+      statusLabel ? el("div", { class: "grupo-status " + statusCls }, statusLabel) : null,
+    ]);
+    head.appendChild(title);
     if (!g.isPool) {
       const acts = el("div", { class: "flex-row" });
       acts.appendChild(el("button", { class: "btn btn-gray btn-sm", onclick: () => {
@@ -438,6 +521,54 @@
       moverEstudiante(co, g.isPool ? null : gruposIndex);
     });
     return card;
+  }
+
+  function renderCompatStats(host, ests, resp) {
+    if (!host) return;
+    const codigos = ests.map(e => String(e.codigo).trim());
+    const enClase = new Set(codigos);
+    // Para cada par (a,b), clasificar: si alguno evaluó rojo → problemática;
+    // si no y alguno verde → compatible; si no y alguno amarillo → neutra;
+    // si no, todo blanco/sin respuesta → desconocida.
+    const color = {};  // color[a][b] → key de pregunta 1.
+    codigos.forEach(a => color[a] = {});
+    resp.forEach(r => {
+      if (Number(r.numero_pregunta) !== 1) return;
+      const a = String(r.codigo).trim(), b = String(r.evaluado_codigo).trim();
+      if (!enClase.has(a) || !enClase.has(b)) return;
+      const k = U.colorOpcionAfinidad(r.opcion_texto).key;
+      if (!k) return;
+      color[a][b] = k;
+    });
+
+    let comp = 0, neu = 0, prob = 0, desc = 0;
+    for (let i = 0; i < codigos.length; i++) {
+      for (let j = i + 1; j < codigos.length; j++) {
+        const a = codigos[i], b = codigos[j];
+        const ab = color[a][b], ba = color[b][a];
+        if (ab === "rojo" || ba === "rojo") prob++;
+        else if (ab === "verde" || ba === "verde") comp++;
+        else if (ab === "amarillo" || ba === "amarillo") neu++;
+        else desc++;
+      }
+    }
+
+    host.innerHTML = `
+      <h4 class="grupos-stats-title">📊 Compatibilidad del curso (por pares)</h4>
+      <div class="grupos-stats-grid">
+        <div class="grupos-stat grupos-stat-ok">
+          <div class="num">${comp}</div><div class="lbl">Compatibles</div>
+        </div>
+        <div class="grupos-stat grupos-stat-warn">
+          <div class="num">${neu}</div><div class="lbl">Neutras</div>
+        </div>
+        <div class="grupos-stat grupos-stat-err">
+          <div class="num">${prob}</div><div class="lbl">Incompatibilidades</div>
+        </div>
+        <div class="grupos-stat grupos-stat-unknown">
+          <div class="num">${desc}</div><div class="lbl">Sin experiencia</div>
+        </div>
+      </div>`;
   }
 
   function moverEstudiante(codigo, destinoIndex) {
