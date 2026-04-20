@@ -330,10 +330,31 @@
   }
 
   function abrirModalImportar(filasParseadas, estsActuales) {
-    // Marcar cuáles ya existen en la clase actual.
-    const codigosActuales = new Set(estsActuales.filter(e => e.codigo).map(e => e.codigo));
-    const nuevos = filasParseadas.filter(f => !codigosActuales.has(f.codigo)).length;
-    const yaExisten = filasParseadas.length - nuevos;
+    const codigosClaseActual = new Set(estsActuales.filter(e => e.codigo).map(e => e.codigo));
+
+    // Agrupar por (curso, grupo). Si no hay curso+grupo, todo cae en un pseudo-grupo "(sin curso)".
+    const combos = [];                 // [{ key, curso, grupo, tab, rows: [...] }]
+    const comboIndex = {};
+    filasParseadas.forEach(f => {
+      const curso = (f.curso || "").trim();
+      const grupo = (f.grupo || "").trim();
+      const key = curso + "¦" + grupo;
+      if (!comboIndex[key]) {
+        comboIndex[key] = combos.length;
+        const tabDefault = (curso && grupo) ? `${curso}°${grupo}` : (claseSel || "(sin clase)");
+        combos.push({ key, curso, grupo, tab: tabDefault, rows: [] });
+      }
+      combos[comboIndex[key]].rows.push(f);
+    });
+    // Orden: grupos reales primero, luego los sin clasificar.
+    combos.sort((a, b) => {
+      if (!!a.curso !== !!b.curso) return a.curso ? -1 : 1;
+      return a.tab.localeCompare(b.tab, "es", { numeric: true });
+    });
+
+    const tieneGrupos = combos.some(c => c.curso || c.grupo);
+    const totalActivos = filasParseadas.filter(f => f.activo).length;
+    const totalInactivos = filasParseadas.length - totalActivos;
 
     const overlay = el("div", { class: "modal-overlay", id: "modal-importar" });
     const modal = el("div", { class: "modal-card" });
@@ -345,44 +366,94 @@
       <div class="modal-body">
         <div class="grupos-stats-grid" style="margin-bottom:14px">
           <div class="grupos-stat grupos-stat-ok">
-            <div class="num">${nuevos}</div><div class="lbl">nuevos a importar</div>
+            <div class="num">${totalActivos}</div><div class="lbl">activos</div>
           </div>
           <div class="grupos-stat grupos-stat-warn">
-            <div class="num">${yaExisten}</div><div class="lbl">ya en la clase</div>
+            <div class="num">${totalInactivos}</div><div class="lbl">con pase / inactivos</div>
           </div>
           <div class="grupos-stat">
             <div class="num">${filasParseadas.length}</div><div class="lbl">total del archivo</div>
           </div>
+          <div class="grupos-stat grupos-stat-unknown">
+            <div class="num">${combos.length}</div><div class="lbl">grupo(s) detectado(s)</div>
+          </div>
         </div>
-        <div class="flex-row" style="gap:8px;margin-bottom:12px">
-          <label style="color:#333;margin:0"><b>Clase destino:</b></label>
-          <span class="badge badge-active">${U.escapeHtml(claseSel)}</span>
+
+        <div class="flex-row" style="gap:14px;flex-wrap:wrap;margin-bottom:12px">
+          <label class="flex-row" style="gap:6px;margin:0">
+            <input type="checkbox" id="solo-activos" checked />
+            <span>Sólo alumnos activos (ignorar <b>Con Pase = Si</b>)</span>
+          </label>
+          <label class="flex-row" style="gap:6px;margin:0">
+            <input type="checkbox" id="modo-reemplazar" />
+            <span class="muted">Reemplazar roster de cada tab destino</span>
+          </label>
         </div>
-        <div class="muted mb-12">Se van a usar las <b>cédulas</b> como código. Los nombres existentes se actualizan si cambiaron.</div>
+
+        ${tieneGrupos ? `
+          <h4 style="margin-bottom:8px">Elegí qué grupos importar y el nombre del tab destino:</h4>
+          <div class="import-combos">
+            ${combos.map((combo, i) => {
+              const activos = combo.rows.filter(r => r.activo).length;
+              const inactivos = combo.rows.length - activos;
+              const etiqueta = combo.curso || combo.grupo
+                ? `${U.escapeHtml(combo.curso || "—")} · ${U.escapeHtml(combo.grupo || "—")}`
+                : "(sin curso/grupo en el archivo)";
+              return `
+                <div class="import-combo" data-idx="${i}">
+                  <label class="import-combo-check">
+                    <input type="checkbox" class="combo-sel" data-idx="${i}" ${combo.curso || combo.grupo ? "checked" : ""} />
+                    <div>
+                      <div class="import-combo-title">${etiqueta}</div>
+                      <div class="muted">${activos} activo(s)${inactivos ? ` · ${inactivos} inactivos` : ""}</div>
+                    </div>
+                  </label>
+                  <div class="import-combo-tab">
+                    <span class="muted">→ Tab:</span>
+                    <input type="text" class="combo-tab" data-idx="${i}" value="${U.escapeHtml(combo.tab)}" />
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        ` : `
+          <div class="flex-row" style="gap:8px;margin-bottom:12px">
+            <label style="color:#333;margin:0"><b>Tab destino:</b></label>
+            <input type="text" id="tab-destino-unico" value="${U.escapeHtml(claseSel || "")}" style="max-width:220px" />
+          </div>
+        `}
+
+        <h4 style="margin:14px 0 8px">Vista previa (primeros 200)</h4>
         <div class="roster-preview">
           <div class="roster-preview-head">
-            <div>Nombre</div><div>Código (CI)</div><div>Estado</div>
+            <div>Nombre</div><div>Código (CI)</div><div>Curso/Grupo</div><div>Estado</div>
           </div>
           <div class="roster-preview-body">
-            ${filasParseadas.slice(0, 200).map(f => `
-              <div class="roster-preview-row">
-                <div>${U.escapeHtml(f.nombre)}</div>
-                <div><code>${U.escapeHtml(f.codigo)}</code></div>
-                <div>${codigosActuales.has(f.codigo) ? '<span class="badge badge-done">ya existe</span>' : '<span class="badge badge-pending">nuevo</span>'}</div>
-              </div>
-            `).join("")}
+            ${filasParseadas.slice(0, 200).map(f => {
+              const estadoLbl = !f.activo
+                ? '<span class="badge badge-closed">con pase</span>'
+                : codigosClaseActual.has(f.codigo)
+                  ? '<span class="badge badge-done">ya en clase</span>'
+                  : '<span class="badge badge-pending">nuevo</span>';
+              const cg = (f.curso || f.grupo) ? `${U.escapeHtml(f.curso || "—")} · ${U.escapeHtml(f.grupo || "—")}` : '<span class="muted">—</span>';
+              return `
+                <div class="roster-preview-row">
+                  <div>${U.escapeHtml(f.nombre)}</div>
+                  <div><code>${U.escapeHtml(f.codigo)}</code></div>
+                  <div>${cg}</div>
+                  <div>${estadoLbl}</div>
+                </div>
+              `;
+            }).join("")}
             ${filasParseadas.length > 200 ? `<div class="muted mt-16">(mostrando los primeros 200 de ${filasParseadas.length})</div>` : ""}
           </div>
         </div>
       </div>
       <div class="modal-foot">
-        <label class="flex-row" style="gap:6px;margin:0">
-          <input type="checkbox" id="modo-reemplazar" />
-          <span class="muted">Reemplazar roster completo de la clase (borra lo que haya)</span>
-        </label>
+        <div class="muted" id="import-summary"></div>
         <div class="flex-row" style="gap:8px">
           <button class="btn btn-gray" id="modal-cancel">Cancelar</button>
-          <button class="btn btn-blue" id="modal-ok">Importar ${filasParseadas.length} alumno(s)</button>
+          <button class="btn btn-blue" id="modal-ok">Importar</button>
         </div>
       </div>
     `;
@@ -394,25 +465,75 @@
     modal.querySelector("#modal-cancel").addEventListener("click", cerrar);
     overlay.addEventListener("click", (e) => { if (e.target === overlay) cerrar(); });
 
-    modal.querySelector("#modal-ok").addEventListener("click", async () => {
-      const modo = modal.querySelector("#modo-reemplazar").checked ? "reemplazar" : "merge";
-      const payload = filasParseadas.map(f => ({ codigo: f.codigo, nombre: f.nombre }));
-      U.toast("Importando…", "info");
-      cerrar();
-      try {
-        const r = await API.importarEstudiantes(pw, claseSel, payload, modo);
-        if (!r || !r.ok) {
-          console.error("importar_estudiantes falló:", r);
-          U.toast("Error: " + ((r && r.error) || "desconocido") + " · mirá la consola", "error");
-          return;
+    const summary = modal.querySelector("#import-summary");
+    const btnOk = modal.querySelector("#modal-ok");
+    const soloActivos = () => modal.querySelector("#solo-activos").checked;
+
+    function actualizarResumen() {
+      const planes = construirPlanesImport();
+      const total = planes.reduce((a, p) => a + p.rows.length, 0);
+      summary.textContent = planes.length
+        ? `${total} alumno(s) en ${planes.length} tab(s)`
+        : "Nada seleccionado";
+      btnOk.disabled = !planes.length;
+    }
+    modal.addEventListener("input", actualizarResumen);
+    modal.addEventListener("change", actualizarResumen);
+
+    function construirPlanesImport() {
+      const planes = [];
+      const soloAct = soloActivos();
+      if (tieneGrupos) {
+        modal.querySelectorAll(".combo-sel").forEach(chk => {
+          if (!chk.checked) return;
+          const idx = Number(chk.dataset.idx);
+          const combo = combos[idx];
+          const tabInput = modal.querySelector(`.combo-tab[data-idx="${idx}"]`);
+          const tab = (tabInput.value || "").trim();
+          if (!tab) return;
+          const rows = combo.rows
+            .filter(r => !soloAct || r.activo)
+            .map(r => ({ codigo: r.codigo, nombre: r.nombre }));
+          if (rows.length) planes.push({ tab, rows });
+        });
+      } else {
+        const tab = (modal.querySelector("#tab-destino-unico").value || "").trim();
+        if (tab) {
+          const rows = filasParseadas
+            .filter(r => !soloAct || r.activo)
+            .map(r => ({ codigo: r.codigo, nombre: r.nombre }));
+          if (rows.length) planes.push({ tab, rows });
         }
+      }
+      return planes;
+    }
+
+    actualizarResumen();
+
+    btnOk.addEventListener("click", async () => {
+      const modo = modal.querySelector("#modo-reemplazar").checked ? "reemplazar" : "merge";
+      const planes = construirPlanesImport();
+      if (!planes.length) return;
+      cerrar();
+      U.toast(`Importando ${planes.length} tab(s)…`, "info");
+      try {
+        const resultados = [];
+        for (const plan of planes) {
+          const r = await API.importarEstudiantes(pw, plan.tab, plan.rows, modo);
+          resultados.push({ tab: plan.tab, r });
+          if (!r || !r.ok) console.error(`importar_estudiantes "${plan.tab}" falló:`, r);
+        }
+        const sumar = (key) => resultados.reduce((a, x) => a + (x.r && x.r[key] ? x.r[key] : 0), 0);
         const partes = [];
-        if (r.agregados) partes.push(`${r.agregados} nuevos`);
-        if (r.actualizados) partes.push(`${r.actualizados} actualizados`);
-        if (r.conflictos_total) partes.push(`${r.conflictos_total} con conflicto`);
-        if (r.invalidos) partes.push(`${r.invalidos} inválidos`);
-        U.toast("Import OK · " + (partes.join(" · ") || "sin cambios"), "success");
-        if (r.conflictos_total) console.warn("Conflictos de códigos con otras clases:", r.conflictos);
+        const ag = sumar("agregados"), ac = sumar("actualizados"),
+              co = sumar("conflictos_total"), inv = sumar("invalidos");
+        if (ag) partes.push(`${ag} nuevos`);
+        if (ac) partes.push(`${ac} actualizados`);
+        if (co) partes.push(`${co} con conflicto`);
+        if (inv) partes.push(`${inv} inválidos`);
+        const fallos = resultados.filter(x => !x.r || !x.r.ok).length;
+        if (fallos) U.toast(`${fallos} tab(s) con error · mirá la consola`, "error");
+        else U.toast("Import OK · " + (partes.join(" · ") || "sin cambios"), "success");
         await refrescar();
       } catch (err) {
         console.error("importar_estudiantes error de red:", err);
