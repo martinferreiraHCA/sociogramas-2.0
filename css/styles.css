@@ -289,14 +289,121 @@ table.data-table tbody tr:hover { background: #fafafa; }
 
 /* ---------- Grupos armados ---------- */
 .grupos-tablero { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
-.grupo-card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 14px; min-height: 160px; }
-.grupo-card h4 { margin-bottom: 8px; font-size: 1.05em; color: #1976d2; }
+.grupo-card {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-left: 4px solid #bdbdbd;
+  border-radius: 10px;
+  padding: 14px;
+  min-height: 160px;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.grupo-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+.grupo-card h4 { margin-bottom: 4px; font-size: 1.05em; color: #1976d2; }
+.grupo-card.status-ok   { border-left-color: #2e7d32; background: linear-gradient(180deg, #f3fbf4 0%, #ffffff 38%); }
+.grupo-card.status-warn { border-left-color: #ef6c00; background: linear-gradient(180deg, #fff8ec 0%, #ffffff 38%); }
+.grupo-card.status-err  { border-left-color: #c62828; background: linear-gradient(180deg, #fdeeee 0%, #ffffff 38%); }
 .grupo-estudiante {
   background: #e3f2fd; border-radius: 16px; padding: 4px 10px;
   margin: 4px 4px 4px 0; display: inline-block; font-size: 0.9em; cursor: grab;
 }
 .grupo-estudiante.dragging { opacity: 0.5; }
 .grupo-card.drop-target { border-color: #4CAF50; background: #f0f8f0; }
+
+.grupo-status {
+  display: inline-block;
+  font-size: 0.75em;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 12px;
+  margin-top: 2px;
+}
+.grupo-status.status-ok   { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+.grupo-status.status-warn { background: #fff3e0; color: #ef6c00; border: 1px solid #ffe0b2; }
+.grupo-status.status-err  { background: #fbe9e7; color: #c62828; border: 1px solid #ffcdd2; }
+
+/* Panel de configuración del armado */
+.grupos-config {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  padding: 16px;
+}
+.grupos-config-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.grupos-config label { color: #333; font-weight: 500; font-size: 0.92em; }
+.grupos-config label span { display: block; margin-bottom: 4px; color: #555; }
+.grupos-config select { max-width: 100%; }
+.grupos-config-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 10px 12px;
+  align-self: end;
+}
+.grupos-config-check input { width: 16px; height: 16px; }
+.grupos-config-check span { margin: 0; }
+.grupos-config-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* Stats de compatibilidad del curso */
+.grupos-stats-title { margin-bottom: 10px; font-size: 1em; color: #333; }
+.grupos-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+.grupos-stat {
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-left: 4px solid #bdbdbd;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+.grupos-stat .num { font-size: 1.7em; font-weight: 700; }
+.grupos-stat .lbl { font-size: 0.85em; color: #666; }
+.grupos-stat-ok      { border-left-color: #2e7d32; background: #f3fbf4; }
+.grupos-stat-ok .num { color: #2e7d32; }
+.grupos-stat-warn    { border-left-color: #f9a825; background: #fffdf0; }
+.grupos-stat-warn .num { color: #b26a00; }
+.grupos-stat-err     { border-left-color: #c62828; background: #fdeeee; }
+.grupos-stat-err .num { color: #c62828; }
+.grupos-stat-unknown { border-left-color: #9e9e9e; background: #f7f7f7; }
+.grupos-stat-unknown .num { color: #555; }
+
+/* Resumen del algoritmo (después de generar) */
+.grupos-algo-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.grupos-algo-tile {
+  background: #fff;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.grupos-algo-tile .num { font-size: 1.5em; font-weight: 700; color: #333; }
+.grupos-algo-tile .lbl { font-size: 0.8em; color: #666; }
+.grupos-algo-ok   { background: #f3fbf4; border-color: #c8e6c9; }
+.grupos-algo-ok .num { color: #2e7d32; }
+.grupos-algo-warn { background: #fff8ec; border-color: #ffe0b2; }
+.grupos-algo-warn .num { color: #ef6c00; }
+.grupos-algo-err  { background: #fdeeee; border-color: #ffcdd2; }
+.grupos-algo-err .num { color: #c62828; }
 
 /* ---------- Util ---------- */
 .flex-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }

@@ -24,7 +24,24 @@
 //               opcion_texto, codigo, evaluado_codigo, ...)
 //   opciones:   opciones de preguntas (para identificar colores de la 1).
 //   params:     { tamGrupo = 4, permitirRojoMutuo = false,
-//                 distribuirLideres = true, distribuirApoyo = true }
+//                 distribuirLideres = true, distribuirApoyo = true,
+//                 estrategia = 'automatico',
+//                 prioridad   = 'evitar_conflictos' }
+//
+//   estrategia (cómo se eligen semillas y el orden de inserción):
+//     - 'automatico': semillas = alumnos más vulnerables (default histórico).
+//     - 'liderazgo' : semillas = referentes (pregunta 7) para que cada grupo
+//                     tenga al menos un líder declarado.
+//     - 'inclusion' : semillas = aislados / rechazados, para distribuirlos.
+//     - 'balanceado': semillas alternadas entre líderes y vulnerables.
+//     - 'homogeneo' : semillas por cuartiles de "recibido positivo", y el
+//                     candidato preferido es el más parecido al grupo.
+//
+//   prioridad (ajusta la función objetivo para insertar y hacer swaps):
+//     - 'evitar_conflictos'    : penaliza fuerte cualquier arista negativa.
+//     - 'maximizar_colaboracion': premia aristas verdes, sobre todo mutuas.
+//     - 'desarrollar_liderazgo': premia agregar un líder a grupos sin líder.
+//     - 'integrar_aislados'    : premia poner aislados junto a populares.
 //
 // Output:
 //   {
@@ -57,7 +74,14 @@
 
   function formarGrupos(students, responses, opciones, params) {
     const P = Object.assign(
-      { tamGrupo: 4, permitirRojoMutuo: false, distribuirLideres: true, distribuirApoyo: true },
+      {
+        tamGrupo: 4,
+        permitirRojoMutuo: false,
+        distribuirLideres: true,
+        distribuirApoyo: true,
+        estrategia: "automatico",
+        prioridad: "evitar_conflictos",
+      },
       params || {}
     );
 
@@ -124,25 +148,28 @@
     // --- Fase 2: determinar número de grupos ---
     const numGrupos = Math.max(1, Math.round(N / P.tamGrupo));
 
-    // --- Fase 3: seeds = los alumnos más vulnerables ---
+    // --- Fase 3: seeds según estrategia ---
     const vulnerabilidad = (k) =>
       tag[k].aislado * 3 + tag[k].apoyo * 2 + tag[k].recibeNegativo - tag[k].recibePositivo;
-    const ordenVuln = ids.map((_, i) => i).sort((a, b) => vulnerabilidad(b) - vulnerabilidad(a));
+    const popularidad = (k) => tag[k].recibePositivo - tag[k].recibeNegativo;
+    const idsIdx = ids.map((_, i) => i);
+
+    const seeds = elegirSemillas(idsIdx, numGrupos, P.estrategia, {
+      vulnerabilidad, popularidad, esLider, esAislado,
+    });
+
     const grupos = [];
     const asignado = new Array(N).fill(false);
-    for (let g = 0; g < numGrupos; g++) {
-      const seed = ordenVuln[g];
-      if (seed == null) break;
+    seeds.forEach((seed, g) => {
       grupos.push({ miembros: [seed], nombre: `Grupo ${g + 1}` });
       asignado[seed] = true;
-    }
+    });
 
     // --- Fase 4: inserción greedy ---
-    // Orden: primero los de opiniones más polarizadas (suma |pares|), para
-    // que sus restricciones se satisfagan antes.
+    // Orden de candidatos según estrategia.
     const pendientes = [];
     for (let i = 0; i < N; i++) if (!asignado[i]) pendientes.push(i);
-    pendientes.sort((a, b) => intensidad(pares, b) - intensidad(pares, a));
+    ordenarPendientes(pendientes, pares, P.estrategia, { popularidad, vulnerabilidad });
 
     const tamMax = P.tamGrupo + 1;
     for (const cand of pendientes) {
@@ -151,11 +178,9 @@
         const G = grupos[g];
         if (G.miembros.length >= tamMax) continue;
         if (!P.permitirRojoMutuo && violaRojoMutuo(cand, G.miembros, score)) continue;
-        let s = 0;
-        for (const m of G.miembros) s += pares[cand][m];
-        // Penalizaciones blandas por concentración de roles.
-        if (P.distribuirLideres && esLider(cand) && G.miembros.some(esLider)) s -= 3;
-        if (P.distribuirApoyo  && esApoyo(cand)  && G.miembros.some(esApoyo))  s -= 2;
+        const s = scoreInsercion(cand, G.miembros, pares, score, P, {
+          esLider, esApoyo, popularidad, tag,
+        });
         if (s > mejorScore) { mejorScore = s; mejor = g; }
       }
       if (mejor === -1) {
@@ -176,7 +201,9 @@
         for (let g2 = g1 + 1; g2 < grupos.length; g2++) {
           for (const a of grupos[g1].miembros.slice()) {
             for (const b of grupos[g2].miembros.slice()) {
-              const delta = deltaSwap(a, b, grupos[g1].miembros, grupos[g2].miembros, pares, score, P);
+              const delta = deltaSwap(a, b, grupos[g1].miembros, grupos[g2].miembros, pares, score, P, {
+                esLider, esApoyo, popularidad, tag,
+              });
               if (delta > 0.0001) {
                 swap(a, b, grupos[g1], grupos[g2]);
                 mejora = true;
@@ -259,7 +286,7 @@
     return s;
   }
 
-  function deltaSwap(a, b, G1, G2, pares, score, P) {
+  function deltaSwap(a, b, G1, G2, pares, score, P, ctx) {
     // Antes: a en G1, b en G2. Después: a en G2 (sin b), b en G1 (sin a).
     let antes = 0, despues = 0;
     for (const m of G1) if (m !== a) { antes += pares[a][m]; despues += pares[b][m]; }
@@ -269,7 +296,150 @@
       for (const m of G2) if (m !== b && score[a][m] < 0 && score[m][a] < 0) return -Infinity;
       for (const m of G1) if (m !== a && score[b][m] < 0 && score[m][b] < 0) return -Infinity;
     }
-    return despues - antes;
+    // Ajustes por prioridad: recalcular componentes del score que dependen
+    // del grupo (no sólo de aristas), como "presencia de líder".
+    const g1Sin = G1.filter((x) => x !== a);
+    const g2Sin = G2.filter((x) => x !== b);
+    const bonoAntes =
+      bonoGrupoPorPrioridad(g1Sin.concat(a), P.prioridad, ctx) +
+      bonoGrupoPorPrioridad(g2Sin.concat(b), P.prioridad, ctx);
+    const bonoDespues =
+      bonoGrupoPorPrioridad(g1Sin.concat(b), P.prioridad, ctx) +
+      bonoGrupoPorPrioridad(g2Sin.concat(a), P.prioridad, ctx);
+    return (despues - antes) + (bonoDespues - bonoAntes);
+  }
+
+  // ---- Estrategia y prioridad ----
+  function elegirSemillas(idxs, k, estrategia, h) {
+    if (k <= 0) return [];
+    const byVuln = idxs.slice().sort((a, b) => h.vulnerabilidad(b) - h.vulnerabilidad(a));
+    const byLider = idxs.slice().sort((a, b) => (h.esLider(b) - h.esLider(a)) || (h.popularidad(b) - h.popularidad(a)));
+    const byPop = idxs.slice().sort((a, b) => h.popularidad(a) - h.popularidad(b)); // menos popular primero
+    if (estrategia === "liderazgo") {
+      return byLider.slice(0, k);
+    }
+    if (estrategia === "inclusion") {
+      // Aislados/rechazados primero como semillas, para separarlos.
+      return byPop.slice(0, k);
+    }
+    if (estrategia === "balanceado") {
+      // Alterna líderes y vulnerables.
+      const out = [], used = new Set();
+      let i = 0, j = 0;
+      while (out.length < k) {
+        if (out.length % 2 === 0) {
+          while (i < byLider.length && used.has(byLider[i])) i++;
+          if (i < byLider.length) { out.push(byLider[i]); used.add(byLider[i]); i++; }
+          else break;
+        } else {
+          while (j < byVuln.length && used.has(byVuln[j])) j++;
+          if (j < byVuln.length) { out.push(byVuln[j]); used.add(byVuln[j]); j++; }
+          else break;
+        }
+      }
+      return out;
+    }
+    if (estrategia === "homogeneo") {
+      // Semillas por cuartiles de popularidad para que cada grupo tenga un
+      // punto de partida representativo de un tramo.
+      const sorted = idxs.slice().sort((a, b) => h.popularidad(b) - h.popularidad(a));
+      const out = [];
+      for (let q = 0; q < k; q++) {
+        const pos = Math.min(sorted.length - 1, Math.floor((q + 0.5) * sorted.length / k));
+        out.push(sorted[pos]);
+      }
+      return out;
+    }
+    // 'automatico'
+    return byVuln.slice(0, k);
+  }
+
+  function ordenarPendientes(pendientes, pares, estrategia, h) {
+    if (estrategia === "homogeneo") {
+      // Primero los más polarizados (igual que antes) para respetar restricciones;
+      // el scoring por similitud se encarga del encaje.
+      pendientes.sort((a, b) => intensidad(pares, b) - intensidad(pares, a));
+      return;
+    }
+    if (estrategia === "inclusion") {
+      pendientes.sort((a, b) => h.vulnerabilidad(b) - h.vulnerabilidad(a));
+      return;
+    }
+    if (estrategia === "liderazgo") {
+      pendientes.sort((a, b) => h.popularidad(b) - h.popularidad(a));
+      return;
+    }
+    // 'automatico' y 'balanceado': por intensidad de opiniones.
+    pendientes.sort((a, b) => intensidad(pares, b) - intensidad(pares, a));
+  }
+
+  function scoreInsercion(cand, miembros, pares, score, P, ctx) {
+    let s = 0;
+    for (const m of miembros) s += pares[cand][m];
+
+    // Distribución de roles (como antes).
+    if (P.distribuirLideres && ctx.esLider(cand) && miembros.some(ctx.esLider)) s -= 3;
+    if (P.distribuirApoyo  && ctx.esApoyo(cand)  && miembros.some(ctx.esApoyo))  s -= 2;
+
+    // Ajuste por prioridad.
+    switch (P.prioridad) {
+      case "maximizar_colaboracion": {
+        // Premio extra por cada lazo verde mutuo con algún miembro actual.
+        for (const m of miembros) {
+          if (score[cand][m] > 0 && score[m][cand] > 0) s += 2;
+        }
+        break;
+      }
+      case "desarrollar_liderazgo": {
+        // Si el grupo todavía no tiene líder y el candidato sí, premio.
+        if (ctx.esLider(cand) && !miembros.some(ctx.esLider)) s += 4;
+        break;
+      }
+      case "integrar_aislados": {
+        // Poner un aislado/rechazado con un grupo de populares suma.
+        const candVuln = ctx.tag[cand].aislado + ctx.tag[cand].recibeNegativo;
+        if (candVuln > 0) {
+          const popularidadGrupo = miembros.reduce((a, m) => a + ctx.popularidad(m), 0);
+          if (popularidadGrupo > 0) s += Math.min(4, popularidadGrupo);
+        }
+        // Y desalentar poner varios vulnerables juntos.
+        const vulnEnGrupo = miembros.filter((m) => ctx.tag[m].aislado + ctx.tag[m].recibeNegativo > 0).length;
+        if (candVuln > 0 && vulnEnGrupo >= 1) s -= 3;
+        break;
+      }
+      case "evitar_conflictos":
+      default: {
+        // Ya está en pares[] (el rojo pesa -5). Refuerzo extra por cada arista
+        // negativa (incluso unilateral) con miembros actuales.
+        for (const m of miembros) {
+          if (score[cand][m] < 0 || score[m][cand] < 0) s -= 1;
+        }
+      }
+    }
+
+    // Homogeneidad: si estrategia es 'homogeneo', favorece candidatos con
+    // popularidad similar al promedio del grupo.
+    if (P.estrategia === "homogeneo" && miembros.length) {
+      const prom = miembros.reduce((a, m) => a + ctx.popularidad(m), 0) / miembros.length;
+      s -= Math.abs(ctx.popularidad(cand) - prom) * 0.5;
+    }
+    return s;
+  }
+
+  function bonoGrupoPorPrioridad(miembros, prioridad, ctx) {
+    if (!ctx) return 0;
+    if (prioridad === "desarrollar_liderazgo") {
+      return miembros.some(ctx.esLider) ? 3 : 0;
+    }
+    if (prioridad === "integrar_aislados") {
+      const vulnCount = miembros.filter((m) => ctx.tag[m].aislado + ctx.tag[m].recibeNegativo > 0).length;
+      // Premio si hay exactamente un vulnerable (queda integrado sin juntarse
+      // con otros).
+      if (vulnCount === 1) return 2;
+      if (vulnCount >= 2) return -2;
+      return 0;
+    }
+    return 0;
   }
 
   function swap(a, b, G1, G2) {
