@@ -3,10 +3,16 @@
 App estática (sin build) para correr sociogramas en clase. Todo el
 front es HTML + JS plano publicado en GitHub Pages.
 
-- **Input**: CSVs en la carpeta `data/` (preguntas, opciones, flujos,
-  estudiantes). Se editan con Excel / Google Sheets / cualquier editor.
+- **Input**:
+  - CSVs en `data/` para preguntas, opciones y flujos (se editan con
+    Excel / Google Sheets / cualquier editor y se commitean).
+  - **Listado de estudiantes en la Google Sheet**: una hoja por clase
+    (nombre del tab = nombre de la clase) con columnas `Nombre` y
+    `Código`. El dashboard tiene un botón **Generar códigos** que
+    completa los códigos vacíos sin pisar los existentes.
 - **Backend**: un Google Apps Script corto que recibe las respuestas por
-  POST y las anexa a una Google Sheet en tu Drive.
+  POST, anexa filas a la Google Sheet y lee el roster desde los tabs
+  por clase.
 - **Output**: la propia Google Sheet — abrís "Archivo → Descargar →
   Microsoft Excel (.xlsx)" o directo "Abrir con Excel" desde Drive.
 
@@ -22,10 +28,10 @@ js/
   api.js                 Carga de CSVs y POST al Apps Script
   cuestionario.js
 data/
-  estudiantes.csv        codigo,nombre,clase
   preguntas.csv          numero,texto,tipo
   opciones.csv           numero_pregunta,orden,texto
   flujos.csv             numero_pregunta,opcion_orden,siguiente_pregunta
+  estudiantes.csv        (legado — el roster ahora vive en la Google Sheet)
   README.md              Detalle del esquema de cada CSV
 apps-script/
   Code.gs                Backend que corre en script.google.com
@@ -48,11 +54,7 @@ apps-script/
    - `SHEET_ID`: el ID copiado en el paso anterior.
    - `TOKEN`: una cadena larga y aleatoria (ej:
      `openssl rand -hex 24`). Este mismo valor va en `js/config.js`.
-   - `ESTUDIANTES_URL` (opcional pero recomendado): URL "raw" del
-     `estudiantes.csv` en GitHub. Formato:
-     `https://raw.githubusercontent.com/USUARIO/REPO/BRANCH/data/estudiantes.csv`.
-     Si se completa, el Apps Script valida que el código exista en el CSV
-     antes de registrar la respuesta.
+   - `ADMIN_PASSWORD`: contraseña del dashboard del docente.
 4. **Guardar** (💾). La primera vez te pedirá autorizar el script a
    acceder a Sheets y a URL Fetch.
 5. **Implementar → Nuevo implementación** → tipo **Aplicación web**.
@@ -82,7 +84,10 @@ python3 -m http.server 8080
 # abrir http://localhost:8080
 ```
 
-Usar un código del `data/estudiantes.csv` (ej: `JUAN001`) para entrar.
+Para probar, crear una hoja en la Google Sheet con el nombre de una clase
+(ej: `1A`), headers `Nombre` y `Código`, cargar uno o dos alumnos y
+generar sus códigos desde el dashboard. Después usar ese código para
+loguearse en `index.html`.
 
 ### 5. Publicar en GitHub Pages
 
@@ -91,17 +96,16 @@ carpeta `/`). El sitio queda en `https://USUARIO.github.io/REPO/`.
 
 ## Cómo gestionar preguntas, flujos y estudiantes
 
-Editar los CSVs en `data/` (ver `data/README.md` para el detalle de
-cada columna) y hacer commit. No hay panel de admin: los cambios viajan
-por git.
-
-Para cambiar la lista de alumnos:
-
-1. Abrir `data/estudiantes.csv` (en Excel, Google Sheets, o un editor de
-   texto).
-2. Agregar/quitar filas. Commit + push.
-3. Los alumnos ven los cambios al recargar (se hace cache-busting con un
-   query string).
+- **Preguntas / opciones / flujos**: editar los CSVs en `data/` (ver
+  `data/README.md` para el detalle de cada columna) y hacer commit.
+- **Estudiantes / códigos**: en la Google Sheet, una hoja por clase con
+  columnas `Nombre` y `Código`.
+  - Desde el dashboard (`dashboard.html`), el panel *Estudiantes y
+    códigos* permite agregar estudiantes, eliminarlos y **generar los
+    códigos que falten** (no pisa los ya cargados).
+  - También se puede editar la planilla a mano y recargar el dashboard.
+  - Los tabs reservados (`respuestas`, `completados`, `grupos`) no se
+    listan como clases.
 
 ## Cómo ver las respuestas
 
@@ -119,7 +123,7 @@ Para cambiar la lista de alumnos:
   fuerte; evita que un bot aleatorio que encuentre la URL pueda escribir.
 - El Apps Script valida:
   - Que el `token` coincida.
-  - (Opcional, con `ESTUDIANTES_URL`) que el `codigo` exista en el CSV.
+  - Que el `codigo` exista en algún tab de clase de la Google Sheet.
   - Que el `codigo` no haya enviado antes (hoja `completados`).
 - Las respuestas viven en tu Google Sheet — solo vos (y a quien compartas
   la hoja) podés leerlas.

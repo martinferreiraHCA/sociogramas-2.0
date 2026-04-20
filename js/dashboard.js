@@ -34,18 +34,19 @@
 
   async function init() {
     root.innerHTML = `<div class="panel-container"><p>Cargando…</p></div>`;
-    const [csvs, resp, compl, grp] = await Promise.all([
+    const [csvs, ests, resp, compl, grp] = await Promise.all([
       API.loadAll(),
+      API.fetchEstudiantes(pw),
       API.fetchRespuestas(pw),
       API.fetchCompletados(pw),
       API.fetchGrupos(pw),
     ]);
-    if (!resp || resp.ok === false) {
+    if (!ests || ests.ok === false || !resp || resp.ok === false) {
       sessionStorage.removeItem("admin_pw");
       window.location.href = "./admin-login.html";
       return;
     }
-    estudiantes = csvs.estudiantes;
+    estudiantes = ests.data || [];
     preguntas   = csvs.preguntas;
     opciones    = csvs.opciones;
     respuestas  = resp.data || [];
@@ -81,6 +82,7 @@
     const resp = respuestas.filter(r => String(r.clase).trim() === claseSel);
     const completadosClase = completados.filter(c => String(c.clase).trim() === claseSel);
     root.appendChild(renderResumen(esClase, resp, completadosClase));
+    root.appendChild(renderRoster(esClase));
     root.appendChild(renderSociograma(esClase, resp));
     root.appendChild(renderDetalle(esClase, resp));
     root.appendChild(renderGrupos(esClase, resp));
@@ -128,23 +130,47 @@
     const c = el("div", { class: "panel-container" });
     c.appendChild(el("h3", null, "Seleccioná una clase"));
     if (!clases.length) {
-      c.appendChild(el("p", { class: "muted mt-16" }, "No hay clases en data/estudiantes.csv."));
-      return c;
+      c.appendChild(el("p", { class: "muted mt-16" }, "No hay clases todavía. Creá una hoja por clase en la planilla, o usá el botón de abajo."));
+    } else {
+      const list = el("div", { class: "list-card mt-16" });
+      clases.forEach(cl => {
+        const count = estudiantes.filter(e => e.clase === cl).length;
+        const compl = completados.filter(c => String(c.clase).trim() === cl).length;
+        const it = el("div", { class: "item" });
+        it.appendChild(el("div", null, [
+          el("div", { style: "font-weight:600" }, cl),
+          el("div", { class: "muted" }, `${count} estudiante(s) · ${compl} completaron`),
+        ]));
+        it.appendChild(el("a", { class: "btn btn-blue btn-sm", href: `./dashboard.html?clase=${encodeURIComponent(cl)}` }, "Ver"));
+        list.appendChild(it);
+      });
+      c.appendChild(list);
     }
-    const list = el("div", { class: "list-card mt-16" });
-    clases.forEach(cl => {
-      const count = estudiantes.filter(e => e.clase === cl).length;
-      const compl = completados.filter(c => String(c.clase).trim() === cl).length;
-      const it = el("div", { class: "item" });
-      it.appendChild(el("div", null, [
-        el("div", { style: "font-weight:600" }, cl),
-        el("div", { class: "muted" }, `${count} estudiante(s) · ${compl} completaron`),
-      ]));
-      it.appendChild(el("a", { class: "btn btn-blue btn-sm", href: `./dashboard.html?clase=${encodeURIComponent(cl)}` }, "Ver"));
-      list.appendChild(it);
-    });
-    c.appendChild(list);
+
+    const wrap = el("div", { class: "mt-16 flex-row", style: "gap:8px" });
+    wrap.appendChild(el("button", { class: "btn", onclick: nuevaClasePrompt }, "+ Nueva clase"));
+    c.appendChild(wrap);
     return c;
+  }
+
+  async function nuevaClasePrompt() {
+    const nombre = prompt("Nombre de la nueva clase (será el nombre del tab en la planilla)");
+    if (!nombre || !nombre.trim()) return;
+    U.toast("Creando clase…", "info");
+    try {
+      const r = await API.crearClase(pw, nombre.trim(), []);
+      if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+      U.toast("Clase creada", "success");
+      API.clearCache();
+      claseSel = nombre.trim();
+      const url = new URL(window.location.href);
+      url.searchParams.set("clase", claseSel);
+      history.replaceState(null, "", url);
+      await init();
+    } catch (err) {
+      console.error(err);
+      U.toast("Error de conexión", "error");
+    }
   }
 
   // ---------- Resumen ----------
@@ -175,6 +201,107 @@
       el("div", { class: "num" }, [icon, " ", String(num)]),
       el("div", { class: "lbl" }, lbl),
     ]);
+  }
+
+  // ---------- Roster (Nombre / Código) ----------
+  function renderRoster(ests) {
+    const c = el("div", { class: "panel-container" });
+    const sinCodigo = ests.filter(e => !e.codigo).length;
+    c.innerHTML = `
+      <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <h3>Estudiantes y códigos</h3>
+        <div class="flex-row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn btn-blue btn-sm" id="btn-gen-codigos" ${sinCodigo ? "" : "disabled"}>
+            🔑 Generar códigos${sinCodigo ? ` (${sinCodigo} sin código)` : ""}
+          </button>
+          <button class="btn btn-gray btn-sm" id="btn-add-est">+ Agregar estudiante</button>
+          <button class="btn btn-gray btn-sm" id="btn-copy-codigos" ${ests.length ? "" : "disabled"}>📋 Copiar CSV</button>
+        </div>
+      </div>
+      <p class="muted mt-16">Los nombres se cargan en la planilla (tab <b>${U.escapeHtml(claseSel)}</b>, columnas <code>Nombre</code> y <code>Código</code>). Con <b>Generar códigos</b> el sistema completa los códigos vacíos sin pisar los existentes.</p>
+      <div id="roster-list" class="roster-list mt-16"></div>
+    `;
+
+    const list = c.querySelector("#roster-list");
+    if (!ests.length) {
+      list.appendChild(el("p", { class: "muted" }, "No hay estudiantes en esta clase todavía."));
+    } else {
+      const ordenados = ests.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+      ordenados.forEach(e => {
+        const row = el("div", { class: "roster-row" });
+        row.appendChild(el("div", { class: "roster-nombre" }, e.nombre));
+        row.appendChild(el("div", { class: "roster-codigo " + (e.codigo ? "" : "vacio") },
+          e.codigo || "— sin código —"));
+        const acts = el("div", { class: "roster-actions" });
+        if (e.codigo) {
+          acts.appendChild(el("button", {
+            class: "btn btn-gray btn-sm",
+            title: "Copiar código",
+            onclick: () => {
+              navigator.clipboard.writeText(e.codigo).then(() => U.toast("Código copiado", "success"));
+            },
+          }, "📋"));
+        }
+        acts.appendChild(el("button", {
+          class: "btn btn-red btn-sm",
+          title: "Eliminar",
+          onclick: () => eliminarAlumno(e),
+        }, "✕"));
+        row.appendChild(acts);
+        list.appendChild(row);
+      });
+    }
+
+    c.querySelector("#btn-gen-codigos").addEventListener("click", async () => {
+      U.toast("Generando códigos…", "info");
+      try {
+        const r = await API.generarCodigos(pw, claseSel);
+        if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+        U.toast(`Listo. ${r.generados} código(s) generado(s)`, "success");
+        await refrescar();
+      } catch (err) { console.error(err); U.toast("Error de conexión", "error"); }
+    });
+
+    c.querySelector("#btn-add-est").addEventListener("click", async () => {
+      const nombre = prompt(`Nombre del nuevo estudiante en ${claseSel}:`);
+      if (!nombre || !nombre.trim()) return;
+      try {
+        const r = await API.agregarEstudiante(pw, claseSel, nombre.trim());
+        if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+        U.toast("Estudiante agregado", "success");
+        await refrescar();
+      } catch (err) { console.error(err); U.toast("Error de conexión", "error"); }
+    });
+
+    c.querySelector("#btn-copy-codigos").addEventListener("click", () => {
+      const csv = "Nombre,Código\n" + ests
+        .slice()
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+        .map(e => `"${e.nombre.replace(/"/g, '""')}",${e.codigo || ""}`)
+        .join("\n");
+      navigator.clipboard.writeText(csv).then(() => U.toast("Copiado al portapapeles", "success"));
+    });
+
+    return c;
+  }
+
+  async function eliminarAlumno(est) {
+    if (!est.codigo) {
+      alert("El estudiante no tiene código asignado. Eliminalo directamente desde la planilla.");
+      return;
+    }
+    if (!confirm(`¿Eliminar a ${est.nombre} (${est.codigo}) de la clase ${claseSel}?`)) return;
+    try {
+      const r = await API.eliminarEstudiante(pw, claseSel, est.codigo);
+      if (!r || !r.ok) { U.toast("Error: " + ((r && r.error) || "desconocido"), "error"); return; }
+      U.toast("Eliminado", "success");
+      await refrescar();
+    } catch (err) { console.error(err); U.toast("Error de conexión", "error"); }
+  }
+
+  async function refrescar() {
+    API.clearCache();
+    await init();
   }
 
   // ---------- Sociograma ----------

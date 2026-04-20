@@ -1,7 +1,8 @@
 // Cuestionario del estudiante (versión CSV + Google Apps Script).
 //
 // Flujo:
-//   1. Login por código (contra data/estudiantes.csv) → compañeros de la misma clase.
+//   1. Login por código (se valida contra el roster de la Google Sheet
+//      vía Apps Script) → compañeros de la misma clase.
 //   2. Pantalla de instrucciones.
 //   3. Pregunta de afinidad (tipo AFINIDAD) por cada compañero, con
 //      sub-pregunta MULTIPLE según lo que diga data/flujos.csv.

@@ -1,54 +1,65 @@
 /**
  * Backend del sociograma sobre Google Apps Script.
  *
+ * MODELO DE DATOS:
+ *   - Una hoja por clase (nombre del tab = identificador de la clase).
+ *     Cada hoja tiene columnas `Nombre` y `Código`. El docente carga los
+ *     nombres y luego pulsa "Generar códigos" en el dashboard, que llama
+ *     a `accion=generar_codigos` y completa los códigos faltantes.
+ *   - Hojas reservadas (no son clases): `respuestas`, `completados`,
+ *     `grupos`. También se ignoran las hojas cuyo header no incluya
+ *     "Nombre" / "Código".
+ *
  * Endpoints:
  *   POST /exec
- *     body { token, codigo, nombre, clase, respuestas }
- *       → registra respuestas del alumno.
- *     body { action: "save_grupos", token_admin, clase, grupos }
- *       → guarda la composición de grupos en la hoja "grupos".
- *   GET /exec?action=ping
- *       → healthcheck.
- *   GET /exec?action=admin_check&pw=...
- *       → valida la contraseña de admin.
- *   GET /exec?action=respuestas&pw=...
- *       → todas las respuestas (hoja `respuestas`).
- *   GET /exec?action=completados&pw=...
- *       → hoja `completados`.
- *   GET /exec?action=grupos&pw=...&clase=...
- *       → grupos guardados para una clase (opcional).
+ *     body { token, codigo, nombre, clase, respuestas }       → cuestionario
+ *     body { action: "save_grupos", token_admin, ... }        → guardar grupos
+ *     body { action: "crear_clase", token_admin, clase, nombres? }
+ *     body { action: "agregar_estudiante", token_admin, clase, nombre }
+ *     body { action: "generar_codigos", token_admin, clase }
+ *     body { action: "eliminar_estudiante", token_admin, clase, codigo }
  *
- * Después de cambiar este archivo hay que hacer "Implementar → Administrar
- * implementaciones → editar → Versión nueva" para que la URL .../exec sirva
- * el código nuevo.
+ *   GET /exec
+ *     ?action=ping                              → healthcheck (público)
+ *     ?action=admin_check&pw=...                → valida password admin
+ *     ?action=login_cuestionario&codigo=...     → login de alumno (público)
+ *     ?action=clases&pw=...                     → lista de clases con conteo
+ *     ?action=estudiantes&pw=...[&clase=]       → estudiantes (todas o una clase)
+ *     ?action=respuestas&pw=...                 → hoja `respuestas`
+ *     ?action=completados&pw=...                → hoja `completados`
+ *     ?action=grupos&pw=...[&clase=]            → grupos guardados
+ *
+ * Después de cambiar este archivo: "Implementar → Administrar
+ * implementaciones → editar → Versión nueva".
  */
 
 const CONFIG = {
   SHEET_ID: "1WpNz1Qj1elOq5GxEBNBGq8bOyhZw88SaRs0wx5Al76Q",
   TOKEN: "d7d1e6cb97cca059ffcdd126d5f4132a76e99442382f29cf",
   ADMIN_PASSWORD: "Colegio4392HCA",
-  // Cambiá `main` por la rama correcta si el CSV no está mergeado aún.
-  ESTUDIANTES_URL: "https://raw.githubusercontent.com/martinferreiraHCA/sociogramas-2.0/main/data/estudiantes.csv",
 };
 
 const HOJA_RESPUESTAS = "respuestas";
 const HOJA_COMPLETADOS = "completados";
 const HOJA_GRUPOS = "grupos";
+const HOJAS_RESERVADAS = [HOJA_RESPUESTAS, HOJA_COMPLETADOS, HOJA_GRUPOS];
 
 const HEADERS_RESPUESTAS = [
-  "timestamp",
-  "codigo",
-  "nombre",
-  "clase",
-  "numero_pregunta",
-  "texto_pregunta",
-  "evaluado_codigo",
-  "evaluado_nombre",
-  "opcion_texto",
-  "otro_texto",
+  "timestamp", "codigo", "nombre", "clase",
+  "numero_pregunta", "texto_pregunta",
+  "evaluado_codigo", "evaluado_nombre",
+  "opcion_texto", "otro_texto",
 ];
 const HEADERS_COMPLETADOS = ["codigo", "nombre", "clase", "completado_at"];
 const HEADERS_GRUPOS = ["clase", "nombre_grupo", "codigos", "nombres", "saved_at"];
+const HEADERS_CLASE = ["Nombre", "Código"];
+
+// Caracteres del código generado: alfanumérico sin caracteres ambiguos
+// (sin 0/O/1/I/L) para evitar errores al copiar a mano.
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const CODE_LEN = 6;
+const CACHE_TTL_LOGIN = 60;       // segundos
+const CACHE_KEY_LOGIN = "login_v2";
 
 // ---------- POST ----------
 function doPost(e) {
@@ -69,8 +80,14 @@ function doPost(e) {
       return jsonResponse({ ok: false, error: "invalid_json" });
     }
 
-    if (body.action === "save_grupos") return saveGrupos(body);
-    return submitRespuestas(body);
+    switch (body.action) {
+      case "save_grupos":          return saveGrupos(body);
+      case "crear_clase":          return crearClase(body);
+      case "agregar_estudiante":   return agregarEstudiante(body);
+      case "generar_codigos":      return generarCodigos(body);
+      case "eliminar_estudiante":  return eliminarEstudiante(body);
+      default:                     return submitRespuestas(body);
+    }
   } catch (err) {
     console.error(err);
     return jsonResponse({ ok: false, error: "server_error", detail: String(err) });
@@ -88,10 +105,10 @@ function submitRespuestas(body) {
   if (!codigo) return jsonResponse({ ok: false, error: "codigo_vacio" });
   if (!respuestas.length) return jsonResponse({ ok: false, error: "sin_respuestas" });
 
-  if (CONFIG.ESTUDIANTES_URL) {
-    if (!validarCodigoContraCSV(codigo)) return jsonResponse({ ok: false, error: "codigo_invalido" });
-  }
   const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  if (!validarCodigoContraSheet(ss, codigo)) {
+    return jsonResponse({ ok: false, error: "codigo_invalido" });
+  }
   const hojaResp = obtenerHoja(ss, HOJA_RESPUESTAS, HEADERS_RESPUESTAS);
   const hojaCompl = obtenerHoja(ss, HOJA_COMPLETADOS, HEADERS_COMPLETADOS);
 
@@ -99,16 +116,10 @@ function submitRespuestas(body) {
 
   const now = new Date();
   const filas = respuestas.map((r) => [
-    now,
-    codigo,
-    nombre,
-    clase,
-    r.numero_pregunta || "",
-    r.texto_pregunta || "",
-    r.evaluado_codigo || "",
-    r.evaluado_nombre || "",
-    r.opcion_texto || "",
-    r.otro_texto || "",
+    now, codigo, nombre, clase,
+    r.numero_pregunta || "", r.texto_pregunta || "",
+    r.evaluado_codigo || "", r.evaluado_nombre || "",
+    r.opcion_texto || "", r.otro_texto || "",
   ]);
   if (filas.length) {
     hojaResp.getRange(hojaResp.getLastRow() + 1, 1, filas.length, HEADERS_RESPUESTAS.length).setValues(filas);
@@ -128,7 +139,6 @@ function saveGrupos(body) {
   const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
   const hoja = obtenerHoja(ss, HOJA_GRUPOS, HEADERS_GRUPOS);
 
-  // Borrar filas existentes para esta clase
   const last = hoja.getLastRow();
   if (last >= 2) {
     const valores = hoja.getRange(2, 1, last - 1, HEADERS_GRUPOS.length).getValues();
@@ -138,8 +148,7 @@ function saveGrupos(body) {
   }
   const now = new Date();
   const filas = grupos.map((g) => [
-    clase,
-    g.nombre || "",
+    clase, g.nombre || "",
     (g.codigos || []).join(", "),
     (g.nombres || []).join(", "),
     now,
@@ -150,21 +159,131 @@ function saveGrupos(body) {
   return jsonResponse({ ok: true, guardados: filas.length });
 }
 
+function crearClase(body) {
+  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const clase = String(body.clase || "").trim();
+  if (!clase) return jsonResponse({ ok: false, error: "clase_vacia" });
+  if (esHojaReservada(clase)) return jsonResponse({ ok: false, error: "nombre_reservado" });
+
+  const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  if (ss.getSheetByName(clase)) return jsonResponse({ ok: false, error: "clase_existe" });
+  const hoja = ss.insertSheet(clase);
+  hoja.appendRow(HEADERS_CLASE);
+  hoja.setFrozenRows(1);
+  hoja.setColumnWidth(1, 240);
+  hoja.setColumnWidth(2, 120);
+
+  const nombres = Array.isArray(body.nombres) ? body.nombres : [];
+  if (nombres.length) {
+    const filas = nombres
+      .map((n) => String(n || "").trim())
+      .filter(Boolean)
+      .map((n) => [n, ""]);
+    if (filas.length) hoja.getRange(2, 1, filas.length, 2).setValues(filas);
+  }
+  invalidarCacheLogin();
+  return jsonResponse({ ok: true, clase, agregados: (Array.isArray(body.nombres) ? body.nombres.length : 0) });
+}
+
+function agregarEstudiante(body) {
+  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const clase = String(body.clase || "").trim();
+  const nombre = String(body.nombre || "").trim();
+  if (!clase || !nombre) return jsonResponse({ ok: false, error: "datos_incompletos" });
+  if (esHojaReservada(clase)) return jsonResponse({ ok: false, error: "nombre_reservado" });
+
+  const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  const hoja = obtenerHojaClase(ss, clase, true);
+  hoja.appendRow([nombre, ""]);
+  invalidarCacheLogin();
+  return jsonResponse({ ok: true, clase, nombre });
+}
+
+function eliminarEstudiante(body) {
+  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const clase = String(body.clase || "").trim();
+  const codigo = String(body.codigo || "").trim();
+  if (!clase || !codigo) return jsonResponse({ ok: false, error: "datos_incompletos" });
+
+  const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  const hoja = obtenerHojaClase(ss, clase, false);
+  if (!hoja) return jsonResponse({ ok: false, error: "clase_no_existe" });
+  const last = hoja.getLastRow();
+  if (last < 2) return jsonResponse({ ok: false, error: "vacio" });
+  const cols = mapaColumnasClase(hoja);
+  const valores = hoja.getRange(2, 1, last - 1, hoja.getLastColumn()).getValues();
+  let borrados = 0;
+  for (let i = valores.length - 1; i >= 0; i--) {
+    const cod = String(valores[i][cols.codigo] || "").trim();
+    if (cod === codigo) { hoja.deleteRow(i + 2); borrados++; }
+  }
+  invalidarCacheLogin();
+  return jsonResponse({ ok: true, borrados });
+}
+
+function generarCodigos(body) {
+  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const clase = String(body.clase || "").trim();
+  if (!clase) return jsonResponse({ ok: false, error: "clase_vacia" });
+
+  const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  const hoja = obtenerHojaClase(ss, clase, false);
+  if (!hoja) return jsonResponse({ ok: false, error: "clase_no_existe" });
+  const cols = mapaColumnasClase(hoja);
+  const last = hoja.getLastRow();
+  if (last < 2) return jsonResponse({ ok: true, generados: 0 });
+
+  // Set global de códigos ya en uso (para garantizar unicidad cross-clase).
+  const usados = recolectarCodigosUsados(ss);
+
+  const rango = hoja.getRange(2, 1, last - 1, hoja.getLastColumn());
+  const valores = rango.getValues();
+  let generados = 0;
+  for (let i = 0; i < valores.length; i++) {
+    const nombre = String(valores[i][cols.nombre] || "").trim();
+    let codigo = String(valores[i][cols.codigo] || "").trim();
+    if (!nombre) continue;
+    if (codigo) { usados[codigo] = true; continue; }
+    codigo = generarCodigoUnico(usados);
+    usados[codigo] = true;
+    valores[i][cols.codigo] = codigo;
+    generados++;
+  }
+  if (generados > 0) rango.setValues(valores);
+  invalidarCacheLogin();
+  return jsonResponse({ ok: true, generados });
+}
+
 // ---------- GET ----------
 function doGet(e) {
   try {
     const params = (e && e.parameter) || {};
     const action = String(params.action || "ping");
+
+    // Endpoints públicos.
     if (action === "ping") {
       return jsonResponse({ ok: true, service: "sociogramas", time: new Date() });
     }
     if (action === "admin_check") {
       return jsonResponse({ ok: params.pw === CONFIG.ADMIN_PASSWORD });
     }
+    if (action === "login_cuestionario") {
+      return loginCuestionario(String(params.codigo || "").trim());
+    }
+
+    // A partir de acá, todo requiere password.
     if (params.pw !== CONFIG.ADMIN_PASSWORD) {
       return jsonResponse({ ok: false, error: "forbidden" });
     }
     const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    if (action === "clases") {
+      return jsonResponse({ ok: true, data: listarClases(ss) });
+    }
+    if (action === "estudiantes") {
+      const clase = String(params.clase || "").trim();
+      const data = clase ? leerEstudiantesClase(ss, clase) : leerTodosLosEstudiantes(ss);
+      return jsonResponse({ ok: true, data });
+    }
     if (action === "respuestas") {
       const hoja = obtenerHoja(ss, HOJA_RESPUESTAS, HEADERS_RESPUESTAS);
       return jsonResponse({ ok: true, data: hojaToObjects(hoja) });
@@ -186,7 +305,97 @@ function doGet(e) {
   }
 }
 
-// ---------- Helpers ----------
+// ---------- Lectura de roster ----------
+function listarClases(ss) {
+  return ss.getSheets()
+    .map((h) => h.getName())
+    .filter((n) => !esHojaReservada(n))
+    .map((n) => {
+      const hoja = ss.getSheetByName(n);
+      let cols;
+      try { cols = mapaColumnasClase(hoja); } catch (e) { return null; }
+      const last = hoja.getLastRow();
+      let total = 0, conCodigo = 0;
+      if (last >= 2) {
+        const v = hoja.getRange(2, 1, last - 1, hoja.getLastColumn()).getValues();
+        for (let i = 0; i < v.length; i++) {
+          const nombre = String(v[i][cols.nombre] || "").trim();
+          const codigo = String(v[i][cols.codigo] || "").trim();
+          if (!nombre) continue;
+          total++;
+          if (codigo) conCodigo++;
+        }
+      }
+      return { clase: n, total, con_codigo: conCodigo, sin_codigo: total - conCodigo };
+    })
+    .filter(Boolean);
+}
+
+function leerEstudiantesClase(ss, clase) {
+  const hoja = obtenerHojaClase(ss, clase, false);
+  if (!hoja) return [];
+  const cols = mapaColumnasClase(hoja);
+  const last = hoja.getLastRow();
+  if (last < 2) return [];
+  const v = hoja.getRange(2, 1, last - 1, hoja.getLastColumn()).getValues();
+  const out = [];
+  for (let i = 0; i < v.length; i++) {
+    const nombre = String(v[i][cols.nombre] || "").trim();
+    const codigo = String(v[i][cols.codigo] || "").trim();
+    if (!nombre) continue;
+    out.push({ codigo, nombre, clase });
+  }
+  return out;
+}
+
+function leerTodosLosEstudiantes(ss) {
+  const out = [];
+  ss.getSheets().forEach((hoja) => {
+    const n = hoja.getName();
+    if (esHojaReservada(n)) return;
+    try { mapaColumnasClase(hoja); } catch (e) { return; }
+    leerEstudiantesClase(ss, n).forEach((e) => out.push(e));
+  });
+  return out;
+}
+
+function loginCuestionario(codigo) {
+  if (!codigo) return jsonResponse({ ok: false, error: "codigo_vacio" });
+  const cache = CacheService.getScriptCache();
+  let snapshot = cache.get(CACHE_KEY_LOGIN);
+  if (snapshot) {
+    snapshot = JSON.parse(snapshot);
+  } else {
+    const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+    snapshot = leerTodosLosEstudiantes(ss);
+    cache.put(CACHE_KEY_LOGIN, JSON.stringify(snapshot), CACHE_TTL_LOGIN);
+  }
+  const est = snapshot.find((e) => e.codigo === codigo);
+  if (!est) return jsonResponse({ ok: false, error: "no_encontrado" });
+  const companeros = snapshot
+    .filter((e) => e.clase === est.clase && e.codigo !== est.codigo && e.codigo)
+    .map((e) => ({ codigo: e.codigo, nombre: e.nombre, clase: e.clase }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+  return jsonResponse({ ok: true, estudiante: est, companeros });
+}
+
+function validarCodigoContraSheet(ss, codigo) {
+  // Reusamos el cache de login (mismo snapshot).
+  const cache = CacheService.getScriptCache();
+  let snapshot = cache.get(CACHE_KEY_LOGIN);
+  if (!snapshot) {
+    snapshot = JSON.stringify(leerTodosLosEstudiantes(ss));
+    cache.put(CACHE_KEY_LOGIN, snapshot, CACHE_TTL_LOGIN);
+  }
+  const arr = JSON.parse(snapshot);
+  return arr.some((e) => e.codigo === codigo);
+}
+
+function invalidarCacheLogin() {
+  try { CacheService.getScriptCache().remove(CACHE_KEY_LOGIN); } catch (e) {}
+}
+
+// ---------- Helpers de hojas ----------
 function obtenerHoja(ss, nombre, headers) {
   let hoja = ss.getSheetByName(nombre);
   if (!hoja) {
@@ -200,6 +409,63 @@ function obtenerHoja(ss, nombre, headers) {
     hoja.setFrozenRows(1);
   }
   return hoja;
+}
+
+function obtenerHojaClase(ss, clase, crearSiFalta) {
+  let hoja = ss.getSheetByName(clase);
+  if (!hoja) {
+    if (!crearSiFalta) return null;
+    hoja = ss.insertSheet(clase);
+    hoja.appendRow(HEADERS_CLASE);
+    hoja.setFrozenRows(1);
+    return hoja;
+  }
+  if (hoja.getLastRow() === 0) {
+    hoja.appendRow(HEADERS_CLASE);
+    hoja.setFrozenRows(1);
+  }
+  return hoja;
+}
+
+function mapaColumnasClase(hoja) {
+  const last = hoja.getLastColumn();
+  const headers = hoja.getRange(1, 1, 1, last).getValues()[0].map((h) => String(h || "").trim().toLowerCase());
+  const nombre = headers.indexOf("nombre");
+  let codigo = headers.indexOf("código");
+  if (codigo < 0) codigo = headers.indexOf("codigo");
+  if (nombre < 0 || codigo < 0) {
+    throw new Error('La hoja "' + hoja.getName() + '" debe tener columnas "Nombre" y "Código".');
+  }
+  return { nombre, codigo };
+}
+
+function esHojaReservada(nombre) {
+  return HOJAS_RESERVADAS.indexOf(nombre) >= 0;
+}
+
+function recolectarCodigosUsados(ss) {
+  const usados = {};
+  leerTodosLosEstudiantes(ss).forEach((e) => { if (e.codigo) usados[e.codigo] = true; });
+  return usados;
+}
+
+function generarCodigoUnico(usados) {
+  for (let intento = 0; intento < 200; intento++) {
+    let c = "";
+    for (let i = 0; i < CODE_LEN; i++) {
+      c += CODE_ALPHABET.charAt(Math.floor(Math.random() * CODE_ALPHABET.length));
+    }
+    if (!usados[c]) return c;
+  }
+  // Plan B: agrandar un dígito.
+  for (let intento = 0; intento < 200; intento++) {
+    let c = "";
+    for (let i = 0; i < CODE_LEN + 1; i++) {
+      c += CODE_ALPHABET.charAt(Math.floor(Math.random() * CODE_ALPHABET.length));
+    }
+    if (!usados[c]) return c;
+  }
+  throw new Error("No se pudo generar un código único");
 }
 
 function hojaToObjects(hoja) {
@@ -228,53 +494,6 @@ function yaCompleto(hojaCompl, codigo) {
     if (String(codigos[i][0]).trim() === codigo) return true;
   }
   return false;
-}
-
-function validarCodigoContraCSV(codigo) {
-  try {
-    const cache = CacheService.getScriptCache();
-    let csv = cache.get("estudiantes_csv");
-    if (!csv) {
-      const res = UrlFetchApp.fetch(CONFIG.ESTUDIANTES_URL, { muteHttpExceptions: true });
-      if (res.getResponseCode() !== 200) return false;
-      csv = res.getContentText();
-      cache.put("estudiantes_csv", csv, 300);
-    }
-    const filas = parseCSV(csv);
-    if (!filas.length) return false;
-    const headers = filas[0].map((h) => h.trim().toLowerCase());
-    const idxCodigo = headers.indexOf("codigo");
-    if (idxCodigo < 0) return false;
-    for (let i = 1; i < filas.length; i++) {
-      if ((filas[i][idxCodigo] || "").trim() === codigo) return true;
-    }
-    return false;
-  } catch (err) {
-    console.error(err);
-    return false;
-  }
-}
-
-function parseCSV(text) {
-  const rows = [];
-  let row = [], field = "", inQuotes = false;
-  text = text.replace(/^\uFEFF/, "");
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (ch === '"') inQuotes = false;
-      else field += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ",") { row.push(field); field = ""; }
-      else if (ch === "\r") {}
-      else if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
-      else field += ch;
-    }
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows.filter((r) => r.length && r.some((c) => c !== ""));
 }
 
 function jsonResponse(obj) {

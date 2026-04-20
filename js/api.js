@@ -1,24 +1,30 @@
 // API del frontend contra los CSVs estáticos y el Apps Script.
 //
-// - Carga `data/estudiantes.csv`, `data/preguntas.csv`, `data/opciones.csv`
-//   y `data/flujos.csv` al iniciar.
-// - `login(codigo)` devuelve el estudiante + sus compañeros (misma clase).
-// - `submitRespuestas({ estudiante, respuestas })` hace POST al Apps Script.
+// Fuentes:
+//   - `data/preguntas.csv`, `data/opciones.csv`, `data/flujos.csv` → CSV en el repo.
+//   - Lista de estudiantes y códigos → Google Sheet vía Apps Script
+//     (una hoja por clase con columnas "Nombre" / "Código").
 //
-// Para evitar preflight CORS con Apps Script mandamos Content-Type:
-// text/plain;charset=utf-8 (POST con ese content-type es "simple request").
+// Para evitar preflight CORS con Apps Script mandamos
+// Content-Type: text/plain;charset=utf-8 (POST con ese content-type es
+// "simple request").
 
 (function () {
   const cfg = window.APP_CONFIG || {};
 
   const paths = {
-    estudiantes: "./data/estudiantes.csv",
-    preguntas:   "./data/preguntas.csv",
-    opciones:    "./data/opciones.csv",
-    flujos:      "./data/flujos.csv",
+    preguntas: "./data/preguntas.csv",
+    opciones:  "./data/opciones.csv",
+    flujos:    "./data/flujos.csv",
   };
 
   let cache = null;
+
+  function requireAppsScript() {
+    if (!cfg.APPS_SCRIPT_URL || cfg.APPS_SCRIPT_URL.includes("PEGAR_")) {
+      throw new Error("Falta configurar APPS_SCRIPT_URL en js/config.js");
+    }
+  }
 
   async function fetchCSV(url) {
     const r = await fetch(url + "?t=" + Date.now(), { cache: "no-store" });
@@ -28,20 +34,12 @@
 
   async function loadAll() {
     if (cache) return cache;
-    const [estudiantes, preguntas, opciones, flujos] = await Promise.all([
-      fetchCSV(paths.estudiantes),
+    const [preguntas, opciones, flujos] = await Promise.all([
       fetchCSV(paths.preguntas),
       fetchCSV(paths.opciones),
       fetchCSV(paths.flujos),
     ]);
     cache = {
-      estudiantes: estudiantes
-        .map(e => ({
-          codigo: (e.codigo || "").trim(),
-          nombre: (e.nombre || "").trim(),
-          clase:  (e.clase  || "").trim(),
-        }))
-        .filter(e => e.codigo),
       preguntas: preguntas
         .map(p => ({
           numero: parseInt(p.numero, 10),
@@ -71,94 +69,93 @@
     return cache;
   }
 
+  // Login del estudiante: valida el código contra la Google Sheet y devuelve
+  // compañeros + configuración del cuestionario.
   async function login(codigoRaw) {
     const codigo = (codigoRaw || "").trim();
     if (!codigo) return { ok: false, error: "codigo_vacio" };
-    const data = await loadAll();
-    const est = data.estudiantes.find(e => e.codigo === codigo);
-    if (!est) return { ok: false, error: "no_encontrado" };
-    const companeros = data.estudiantes
-      .filter(e => e.clase === est.clase && e.codigo !== est.codigo)
-      .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+    requireAppsScript();
+    const [config, r] = await Promise.all([
+      loadAll(),
+      getJSON("login_cuestionario", { codigo }),
+    ]);
+    if (!r.ok) return r;
     return {
       ok: true,
-      estudiante: est,
-      companeros,
-      preguntas: data.preguntas,
-      opciones: data.opciones,
-      flujos: data.flujos,
+      estudiante: r.estudiante,
+      companeros: (r.companeros || []).sort((a, b) => a.nombre.localeCompare(b.nombre, "es")),
+      preguntas: config.preguntas,
+      opciones: config.opciones,
+      flujos: config.flujos,
     };
   }
 
   async function submitRespuestas(payload) {
-    if (!cfg.APPS_SCRIPT_URL || cfg.APPS_SCRIPT_URL.includes("PEGAR_")) {
-      throw new Error("Falta configurar APPS_SCRIPT_URL en js/config.js");
-    }
-    const body = JSON.stringify({
+    requireAppsScript();
+    return await postJSON({
       token: cfg.APPS_SCRIPT_TOKEN,
       codigo: payload.estudiante.codigo,
       nombre: payload.estudiante.nombre,
       clase:  payload.estudiante.clase,
       respuestas: payload.respuestas,
     });
-    // Content-Type text/plain evita preflight CORS con Apps Script.
-    const r = await fetch(cfg.APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body,
-      redirect: "follow",
-    });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
   }
 
-  async function adminCheck(pw) {
-    const url = cfg.APPS_SCRIPT_URL + "?action=admin_check&pw=" + encodeURIComponent(pw);
-    const r = await fetch(url, { redirect: "follow" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
-  }
-
-  async function fetchRespuestas(pw) {
-    const url = cfg.APPS_SCRIPT_URL + "?action=respuestas&pw=" + encodeURIComponent(pw);
-    const r = await fetch(url, { redirect: "follow" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
-  }
-
-  async function fetchCompletados(pw) {
-    const url = cfg.APPS_SCRIPT_URL + "?action=completados&pw=" + encodeURIComponent(pw);
-    const r = await fetch(url, { redirect: "follow" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
-  }
-
+  async function adminCheck(pw) { return await getJSON("admin_check", { pw }); }
+  async function fetchRespuestas(pw)  { return await getJSON("respuestas", { pw }); }
+  async function fetchCompletados(pw) { return await getJSON("completados", { pw }); }
   async function fetchGrupos(pw, clase) {
-    let url = cfg.APPS_SCRIPT_URL + "?action=grupos&pw=" + encodeURIComponent(pw);
-    if (clase) url += "&clase=" + encodeURIComponent(clase);
-    const r = await fetch(url, { redirect: "follow" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
+    const p = { pw };
+    if (clase) p.clase = clase;
+    return await getJSON("grupos", p);
+  }
+  async function fetchClases(pw) { return await getJSON("clases", { pw }); }
+  async function fetchEstudiantes(pw, clase) {
+    const p = { pw };
+    if (clase) p.clase = clase;
+    return await getJSON("estudiantes", p);
   }
 
   async function saveGrupos(pw, clase, grupos) {
-    const body = JSON.stringify({
-      action: "save_grupos",
-      token_admin: pw,
-      clase,
-      grupos,
-    });
+    return await postJSON({ action: "save_grupos", token_admin: pw, clase, grupos });
+  }
+  async function crearClase(pw, clase, nombres) {
+    return await postJSON({ action: "crear_clase", token_admin: pw, clase, nombres: nombres || [] });
+  }
+  async function agregarEstudiante(pw, clase, nombre) {
+    return await postJSON({ action: "agregar_estudiante", token_admin: pw, clase, nombre });
+  }
+  async function generarCodigos(pw, clase) {
+    return await postJSON({ action: "generar_codigos", token_admin: pw, clase });
+  }
+  async function eliminarEstudiante(pw, clase, codigo) {
+    return await postJSON({ action: "eliminar_estudiante", token_admin: pw, clase, codigo });
+  }
+
+  // ---- Helpers HTTP ----
+  async function getJSON(action, params) {
+    requireAppsScript();
+    const qs = Object.entries(Object.assign({ action }, params || {}))
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join("&");
+    const r = await fetch(cfg.APPS_SCRIPT_URL + "?" + qs, { redirect: "follow" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  }
+
+  async function postJSON(body) {
+    requireAppsScript();
     const r = await fetch(cfg.APPS_SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body,
+      body: JSON.stringify(body),
       redirect: "follow",
     });
     if (!r.ok) throw new Error("HTTP " + r.status);
     return await r.json();
   }
 
-  // Para cache-busting cuando el docente edita CSVs en el repo sin esperar el bust del fetch.
   function clearCache() { cache = null; }
 
   window.API = {
@@ -169,7 +166,13 @@
     fetchRespuestas,
     fetchCompletados,
     fetchGrupos,
+    fetchClases,
+    fetchEstudiantes,
     saveGrupos,
+    crearClase,
+    agregarEstudiante,
+    generarCodigos,
+    eliminarEstudiante,
     clearCache,
   };
 })();

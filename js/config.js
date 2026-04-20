@@ -7,8 +7,8 @@
 // El token NO es un secreto fuerte (queda en el navegador), pero evita que
 // cualquier persona que encuentre la URL de Apps Script pueda escribir en
 // tu hoja. Para protección real, la validación fuerte vive del lado del
-// Apps Script (chequear código contra estudiantes.csv + hoja "completados"
-// para evitar duplicados).
+// Apps Script (chequear código contra los tabs de clase de la Google Sheet
+// + hoja "completados" para evitar duplicados).
 window.APP_CONFIG = {
   // Completá con la URL .../exec que te da Apps Script al hacer el deploy.
   APPS_SCRIPT_URL:   "https://script.google.com/macros/s/AKfycby8J-q2ZNSv-aR8JDCwaPBucjHSyZ836CdOn6AiKFzLLF3fU7vePRJyrJ3MZ2zOQgsBXg/exec",
