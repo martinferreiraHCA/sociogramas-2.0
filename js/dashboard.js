@@ -26,6 +26,31 @@
     estrategia: "automatico",
     prioridad: "evitar_conflictos",
   };
+  // Indica si `gruposLocal` viene de un borrador local (no guardado en la
+  // planilla). Se muestra como badge y se limpia al hacer Guardar.
+  let draftActivo = false;
+
+  // ---- Borrador local por clase (sobrevive a refrescos) ----
+  const DRAFT_PREFIX = "sociogramas-draft:";
+  const draftKey = (cl) => DRAFT_PREFIX + cl;
+  function cargarBorrador(cl) {
+    const raw = U.lsGet(draftKey(cl), null);
+    return raw && raw.version === 1 ? raw : null;
+  }
+  function guardarBorrador() {
+    if (!claseSel) return;
+    U.lsSet(draftKey(claseSel), {
+      version: 1,
+      gruposLocal: gruposLocal || [],
+      gruposConfig,
+      savedAt: new Date().toISOString(),
+    });
+    draftActivo = true;
+  }
+  function limpiarBorrador(cl) {
+    U.lsDel(draftKey(cl || claseSel));
+    draftActivo = false;
+  }
 
   init().catch(err => {
     console.error(err);
@@ -56,7 +81,22 @@
 
     if (!claseSel && clases.length === 1) claseSel = clases[0];
     if (claseSel) {
-      gruposLocal = gruposParaClase(grupos, claseSel);
+      const servidor = gruposParaClase(grupos, claseSel);
+      if (servidor && servidor.length) {
+        gruposLocal = servidor;
+        draftActivo = false;
+      } else {
+        const bor = cargarBorrador(claseSel);
+        if (bor && Array.isArray(bor.gruposLocal) && bor.gruposLocal.length) {
+          gruposLocal = bor.gruposLocal;
+          if (bor.gruposConfig) gruposConfig = Object.assign({}, gruposConfig, bor.gruposConfig);
+          draftActivo = true;
+          console.info(`[draft] Recuperado borrador de "${claseSel}" (${bor.savedAt})`);
+        } else {
+          gruposLocal = null;
+          draftActivo = false;
+        }
+      }
     }
     render();
   }
@@ -81,11 +121,58 @@
     const esClase = estudiantes.filter(e => e.clase === claseSel);
     const resp = respuestas.filter(r => String(r.clase).trim() === claseSel);
     const completadosClase = completados.filter(c => String(c.clase).trim() === claseSel);
+    root.appendChild(renderStepper(esClase, completadosClase));
     root.appendChild(renderResumen(esClase, resp, completadosClase));
-    root.appendChild(renderRoster(esClase));
-    root.appendChild(renderSociograma(esClase, resp));
-    root.appendChild(renderDetalle(esClase, resp));
-    root.appendChild(renderGrupos(esClase, resp));
+    root.appendChild(wrapId("paso-roster", renderRoster(esClase, completadosClase)));
+    root.appendChild(wrapId("paso-sociograma", renderSociograma(esClase, resp)));
+    root.appendChild(wrapId("paso-respuestas", renderDetalle(esClase, resp)));
+    root.appendChild(wrapId("paso-grupos", renderGrupos(esClase, resp)));
+  }
+
+  function wrapId(id, node) {
+    node.id = id;
+    return node;
+  }
+
+  function renderStepper(ests, compl) {
+    const c = el("div", { class: "panel-container workflow-panel" });
+    const totalEst = ests.length;
+    const totalCompl = compl.length;
+    const gruposLen = (gruposLocal && gruposLocal.length) || 0;
+    const pct = totalEst ? Math.round((totalCompl / totalEst) * 100) : 0;
+
+    const estRoster = totalEst === 0 ? "pending" : "done";
+    const estResp = totalEst === 0 ? "locked" : (totalCompl >= totalEst ? "done" : (totalCompl > 0 ? "progress" : "pending"));
+    const estGrup = totalEst === 0 ? "locked" : (gruposLen > 0 ? (draftActivo ? "progress" : "done") : "pending");
+
+    c.innerHTML = `
+      <div class="workflow">
+        <a class="workflow-step ${estRoster}" href="#paso-roster">
+          <div class="workflow-num">1</div>
+          <div>
+            <div class="workflow-title">Alumnos y códigos</div>
+            <div class="workflow-meta">${totalEst ? `${totalEst} en la clase` : "Importá el CSV del colegio"}</div>
+          </div>
+          <div class="workflow-icon">${estRoster === "done" ? "✓" : "•"}</div>
+        </a>
+        <a class="workflow-step ${estResp}" href="#paso-respuestas">
+          <div class="workflow-num">2</div>
+          <div>
+            <div class="workflow-title">Respuestas</div>
+            <div class="workflow-meta">${totalEst ? `${totalCompl}/${totalEst} (${pct}%)` : "—"}</div>
+          </div>
+          <div class="workflow-icon">${estResp === "done" ? "✓" : estResp === "progress" ? "…" : "•"}</div>
+        </a>
+        <a class="workflow-step ${estGrup}" href="#paso-grupos">
+          <div class="workflow-num">3</div>
+          <div>
+            <div class="workflow-title">Armado de grupos</div>
+            <div class="workflow-meta">${gruposLen ? `${gruposLen} grupo(s)${draftActivo ? " · borrador" : ""}` : "Generá los grupos"}</div>
+          </div>
+          <div class="workflow-icon">${estGrup === "done" ? "✓" : estGrup === "progress" ? "📝" : "•"}</div>
+        </a>
+      </div>`;
+    return c;
   }
 
   function headerBar() {
@@ -104,15 +191,18 @@
       </div>`;
     h.innerHTML = sel;
     const selNode = h.querySelector("#sel-clase");
-    if (selNode) selNode.addEventListener("change", () => {
+    if (selNode) selNode.addEventListener("change", async () => {
       claseSel = selNode.value || "";
       gruposLocal = null; resultadoAlgoritmo = null;
       gruposConfig = { tamGrupo: 4, permitirRojoMutuo: false, estrategia: "automatico", prioridad: "evitar_conflictos" };
+      draftActivo = false;
       const url = new URL(window.location.href);
       if (claseSel) url.searchParams.set("clase", claseSel);
       else url.searchParams.delete("clase");
       history.replaceState(null, "", url);
-      render();
+      // Re-correr init() para aplicar la lógica de borrador/servidor sobre la
+      // clase recién seleccionada.
+      if (claseSel) await init(); else render();
     });
     h.querySelector("#btn-logout").addEventListener("click", () => {
       sessionStorage.removeItem("admin_pw");
@@ -208,44 +298,76 @@
   }
 
   // ---------- Roster (Nombre / Código) ----------
-  function renderRoster(ests) {
+  function renderRoster(ests, compl) {
     const c = el("div", { class: "panel-container" });
     const sinCodigo = ests.filter(e => !e.codigo).length;
-    c.innerHTML = `
-      <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <h3>Estudiantes y códigos</h3>
-        <div class="flex-row" style="gap:8px;flex-wrap:wrap">
-          <button class="btn btn-green btn-sm" id="btn-importar-csv">📥 Importar CSV del colegio</button>
-          <button class="btn btn-blue btn-sm" id="btn-gen-codigos" ${sinCodigo ? "" : "disabled"}>
-            🔑 Generar códigos${sinCodigo ? ` (${sinCodigo} sin código)` : ""}
-          </button>
-          <button class="btn btn-gray btn-sm" id="btn-add-est">+ Agregar estudiante</button>
-          <button class="btn btn-gray btn-sm" id="btn-copy-codigos" ${ests.length ? "" : "disabled"}>📋 Copiar CSV</button>
-          <input type="file" id="file-roster" accept=".csv,text/csv" style="display:none" />
-        </div>
-      </div>
-      <p class="muted mt-16">Los nombres se cargan en la planilla (tab <b>${U.escapeHtml(claseSel)}</b>, columnas <code>Nombre</code> y <code>Código</code>). Podés <b>importar el CSV del colegio</b> (se usan las cédulas como código) o usar <b>Generar códigos</b> para completar con códigos random los que estén vacíos.</p>
-      <div id="roster-list" class="roster-list mt-16"></div>
-    `;
+    const codigosCompl = new Set((compl || []).map(x => String(x.codigo).trim()));
 
-    const list = c.querySelector("#roster-list");
     if (!ests.length) {
-      list.appendChild(el("p", { class: "muted" }, "No hay estudiantes en esta clase todavía."));
+      // Empty state: CTA grande para importar el CSV.
+      c.innerHTML = `
+        <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <h3>1 · Alumnos y códigos</h3>
+          <span class="badge badge-pending">vacío</span>
+        </div>
+        <div class="empty-hero mt-16">
+          <div class="empty-hero-emoji">📥</div>
+          <h3>La clase <b>${U.escapeHtml(claseSel)}</b> todavía no tiene alumnos</h3>
+          <p class="muted">Subí el CSV del colegio y el sistema usa las cédulas como código, separando por curso y grupo (8°1, 8°2, ...).</p>
+          <div class="flex-row" style="justify-content:center;gap:10px;margin-top:18px;flex-wrap:wrap">
+            <button class="btn btn-green" id="btn-importar-csv">📥 Importar CSV del colegio</button>
+            <button class="btn btn-gray" id="btn-add-est">+ Agregar manualmente</button>
+          </div>
+          <input type="file" id="file-roster" accept=".csv,text/csv" style="display:none" />
+        </div>`;
     } else {
+      c.innerHTML = `
+        <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <h3>1 · Alumnos y códigos <span class="muted" style="font-weight:400">· ${ests.length}</span></h3>
+          <div class="flex-row" style="gap:8px;flex-wrap:wrap">
+            <button class="btn btn-green btn-sm" id="btn-importar-csv">📥 Importar CSV</button>
+            <button class="btn btn-blue btn-sm" id="btn-gen-codigos" ${sinCodigo ? "" : "disabled"}>
+              🔑 Generar códigos${sinCodigo ? ` (${sinCodigo})` : ""}
+            </button>
+            <button class="btn btn-gray btn-sm" id="btn-add-est">+ Agregar</button>
+            <button class="btn btn-gray btn-sm" id="btn-copy-codigos">📋 Copiar CSV</button>
+            <input type="file" id="file-roster" accept=".csv,text/csv" style="display:none" />
+          </div>
+        </div>
+        <p class="muted mt-16">Planilla · tab <b>${U.escapeHtml(claseSel)}</b>. Las cédulas se usan como código. Podés importar el CSV institucional o generar códigos random para los alumnos que no tengan.</p>
+        <div class="roster-table mt-16">
+          <div class="roster-thead">
+            <div>Nombre</div>
+            <div>Código</div>
+            <div>Estado</div>
+            <div></div>
+          </div>
+          <div class="roster-tbody" id="roster-list"></div>
+        </div>`;
+
+      const list = c.querySelector("#roster-list");
       const ordenados = ests.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
       ordenados.forEach(e => {
-        const row = el("div", { class: "roster-row" });
+        const row = el("div", { class: "roster-tr" });
         row.appendChild(el("div", { class: "roster-nombre" }, e.nombre));
-        row.appendChild(el("div", { class: "roster-codigo " + (e.codigo ? "" : "vacio") },
-          e.codigo || "— sin código —"));
+        if (e.codigo) {
+          row.appendChild(el("div", null, [el("code", { class: "roster-codigo" }, e.codigo)]));
+        } else {
+          row.appendChild(el("div", null, [el("span", { class: "badge badge-pending" }, "— sin código —")]));
+        }
+        const estado = !e.codigo
+          ? el("span", { class: "badge badge-pending" }, "sin código")
+          : codigosCompl.has(e.codigo)
+            ? el("span", { class: "badge badge-active" }, "✓ completó")
+            : el("span", { class: "badge badge-done" }, "pendiente");
+        row.appendChild(el("div", null, [estado]));
+
         const acts = el("div", { class: "roster-actions" });
         if (e.codigo) {
           acts.appendChild(el("button", {
             class: "btn btn-gray btn-sm",
             title: "Copiar código",
-            onclick: () => {
-              navigator.clipboard.writeText(e.codigo).then(() => U.toast("Código copiado", "success"));
-            },
+            onclick: () => navigator.clipboard.writeText(e.codigo).then(() => U.toast("Código copiado", "success")),
           }, "📋"));
         }
         acts.appendChild(el("button", {
@@ -258,7 +380,9 @@
       });
     }
 
-    c.querySelector("#btn-gen-codigos").addEventListener("click", async () => {
+    const on = (sel, ev, fn) => { const n = c.querySelector(sel); if (n) n.addEventListener(ev, fn); };
+
+    on("#btn-gen-codigos", "click", async () => {
       U.toast("Generando códigos…", "info");
       try {
         const r = await API.generarCodigos(pw, claseSel);
@@ -275,7 +399,7 @@
       }
     });
 
-    c.querySelector("#btn-add-est").addEventListener("click", async () => {
+    on("#btn-add-est", "click", async () => {
       const nombre = prompt(`Nombre del nuevo estudiante en ${claseSel}:`);
       if (!nombre || !nombre.trim()) return;
       try {
@@ -293,7 +417,7 @@
       }
     });
 
-    c.querySelector("#btn-copy-codigos").addEventListener("click", () => {
+    on("#btn-copy-codigos", "click", () => {
       const csv = "Nombre,Código\n" + ests
         .slice()
         .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
@@ -303,8 +427,8 @@
     });
 
     const fileInput = c.querySelector("#file-roster");
-    c.querySelector("#btn-importar-csv").addEventListener("click", () => fileInput.click());
-    fileInput.addEventListener("change", (ev) => {
+    on("#btn-importar-csv", "click", () => fileInput && fileInput.click());
+    if (fileInput) fileInput.addEventListener("change", (ev) => {
       const f = ev.target.files && ev.target.files[0];
       ev.target.value = "";
       if (!f) return;
@@ -713,11 +837,11 @@
     const c = el("div", { class: "panel-container" });
     c.innerHTML = `
       <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <h3>Armado de grupos</h3>
+        <h3>3 · Armado de grupos ${draftActivo ? '<span class="badge badge-pending" title="Hay cambios en local que todavía no están en la planilla">📝 borrador no guardado</span>' : ''}</h3>
         <div class="flex-row" style="gap:8px;flex-wrap:wrap">
           <button class="btn btn-gray btn-sm" id="btn-add-grupo">+ Grupo</button>
           <button class="btn btn-orange btn-sm" id="btn-reset">Reiniciar</button>
-          <button class="btn" id="btn-save">Guardar</button>
+          <button class="btn" id="btn-save">💾 Guardar en planilla</button>
         </div>
       </div>
       <p class="muted mt-16">Configurá los parámetros y presioná <b>Generar grupos</b>. El algoritmo arma grupos ponderando afinidades, reciprocidades y criterios de distribución (líderes, alumnos que necesitan más apoyo, aislados). Podés ajustar a mano con drag&amp;drop.</p>
@@ -785,8 +909,9 @@
       };
       resultadoAlgoritmo = GROUPS.formarGrupos(ests, resp, opciones, gruposConfig);
       gruposLocal = resultadoAlgoritmo.grupos.map(g => ({ nombre: g.nombre, codigos: [...g.codigos] }));
+      guardarBorrador();
       render();
-      U.toast("Grupos generados", "success");
+      U.toast("Grupos generados (borrador local guardado)", "success");
     };
     c.querySelector("#btn-auto").addEventListener("click", generar);
     c.querySelector("#btn-regenerar").addEventListener("click", generar);
@@ -795,11 +920,13 @@
       if (!n) return;
       gruposLocal = gruposLocal || [];
       gruposLocal.push({ nombre: n, codigos: [] });
+      guardarBorrador();
       render();
     });
     c.querySelector("#btn-reset").addEventListener("click", () => {
       if (!confirm("Borrar la composición de grupos en pantalla?")) return;
       gruposLocal = []; resultadoAlgoritmo = null;
+      limpiarBorrador();
       render();
     });
     c.querySelector("#btn-save").addEventListener("click", guardarGrupos);
@@ -967,6 +1094,7 @@
     if (destinoIndex !== null && destinoIndex >= 0 && gruposLocal[destinoIndex]) {
       gruposLocal[destinoIndex].codigos.push(codigo);
     }
+    guardarBorrador();
     render();
   }
 
@@ -980,11 +1108,17 @@
     }));
     try {
       const r = await API.saveGrupos(pw, claseSel, payload);
-      if (r && r.ok) U.toast("Grupos guardados en Google Sheets", "success");
-      else U.toast("Error al guardar: " + (r && r.error || "desconocido"), "error");
+      if (r && r.ok) {
+        U.toast("Grupos guardados en Google Sheets", "success");
+        limpiarBorrador();
+        render();
+      } else {
+        console.error("saveGrupos falló:", r);
+        U.toast("Error al guardar: " + (r && r.error || "desconocido"), "error");
+      }
     } catch (err) {
-      console.error(err);
-      U.toast("Error de conexión", "error");
+      console.error("saveGrupos error de red:", err);
+      U.toast("Error de conexión: " + (err.message || err), "error");
     }
   }
 })();
