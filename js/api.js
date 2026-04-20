@@ -133,27 +133,69 @@
   }
 
   // ---- Helpers HTTP ----
+  // Enmascara credenciales para no imprimirlas en consola.
+  function redact(body) {
+    const out = Object.assign({}, body || {});
+    ["token", "token_admin", "pw"].forEach(k => {
+      if (out[k]) out[k] = "***" + String(out[k]).slice(-2);
+    });
+    return out;
+  }
+
   async function getJSON(action, params) {
     requireAppsScript();
     const qs = Object.entries(Object.assign({ action }, params || {}))
       .filter(([, v]) => v !== undefined && v !== null && v !== "")
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
       .join("&");
-    const r = await fetch(cfg.APPS_SCRIPT_URL + "?" + qs, { redirect: "follow" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
+    const url = cfg.APPS_SCRIPT_URL + "?" + qs;
+    const label = `[API GET] action=${action}`;
+    console.debug(label, redact(Object.assign({ action }, params || {})));
+    let r;
+    try { r = await fetch(url, { redirect: "follow" }); }
+    catch (err) { console.error(label, "fetch_failed", err); throw err; }
+    if (!r.ok) { console.error(label, "HTTP " + r.status); throw new Error("HTTP " + r.status); }
+    const text = await r.text();
+    let json;
+    try { json = JSON.parse(text); }
+    catch (err) {
+      console.error(label, "invalid_json. Body preview:", text.slice(0, 400));
+      throw new Error("respuesta_no_json");
+    }
+    if (!json.ok) console.warn(label, "→", json);
+    else console.debug(label, "→ ok", summarize(json));
+    return json;
   }
 
   async function postJSON(body) {
     requireAppsScript();
-    const r = await fetch(cfg.APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(body),
-      redirect: "follow",
-    });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return await r.json();
+    const label = `[API POST] action=${body && body.action ? body.action : "(submit)"}`;
+    console.debug(label, redact(body));
+    let r;
+    try {
+      r = await fetch(cfg.APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(body),
+        redirect: "follow",
+      });
+    } catch (err) { console.error(label, "fetch_failed", err); throw err; }
+    if (!r.ok) { console.error(label, "HTTP " + r.status); throw new Error("HTTP " + r.status); }
+    const text = await r.text();
+    let json;
+    try { json = JSON.parse(text); }
+    catch (err) {
+      console.error(label, "invalid_json. Body preview:", text.slice(0, 400));
+      throw new Error("respuesta_no_json");
+    }
+    if (!json.ok) console.warn(label, "→", json);
+    else console.debug(label, "→ ok", summarize(json));
+    return json;
+  }
+
+  function summarize(json) {
+    if (Array.isArray(json.data)) return { ok: true, "data.length": json.data.length };
+    return json;
   }
 
   function clearCache() { cache = null; }
