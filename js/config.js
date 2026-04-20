@@ -11,7 +11,7 @@
 // + hoja "completados" para evitar duplicados).
 window.APP_CONFIG = {
   // Completá con la URL .../exec que te da Apps Script al hacer el deploy.
-  APPS_SCRIPT_URL:   "https://script.google.com/macros/s/AKfycby8J-q2ZNSv-aR8JDCwaPBucjHSyZ836CdOn6AiKFzLLF3fU7vePRJyrJ3MZ2zOQgsBXg/exec",
+  APPS_SCRIPT_URL:   "https://script.google.com/macros/s/AKfycbyQNEruHKDWolahcsCbY6qCQIr7zSFLhUf6WsM3SeGO_05p1He4tIE1eHSPDMOJY7eiJg/exec",
   // Tiene que coincidir con CONFIG.TOKEN en apps-script/Code.gs.
   APPS_SCRIPT_TOKEN: "d7d1e6cb97cca059ffcdd126d5f4132a76e99442382f29cf",
 };
