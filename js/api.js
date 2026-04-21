@@ -140,6 +140,9 @@
       modo: modo || "merge",
     });
   }
+  async function debugAuth(pw) {
+    return await postJSON({ action: "debug_auth", token_admin: pw });
+  }
 
   // ---- Helpers HTTP ----
   // Enmascara credenciales para no imprimirlas en consola.
@@ -225,6 +228,7 @@
     generarCodigos,
     eliminarEstudiante,
     importarEstudiantes,
+    debugAuth,
     clearCache,
   };
 })();

@@ -186,6 +186,7 @@
               <option value="">— Cambiar clase —</option>
               ${clases.map(c => `<option value="${U.escapeHtml(c)}" ${c===claseSel?"selected":""}>${U.escapeHtml(c)}</option>`).join("")}
             </select>` : ""}
+          <button class="btn btn-gray btn-sm" id="btn-diag" title="Verificar la password contra el Apps Script">🔐 Diagnóstico</button>
           <button class="btn btn-gray btn-sm" id="btn-refrescar">Actualizar</button>
           <button class="btn btn-gray btn-sm" id="btn-logout">Salir</button>
         </div>
@@ -214,6 +215,7 @@
       API.clearCache();
       await init();
     });
+    h.querySelector("#btn-diag").addEventListener("click", ejecutarDiagnosticoAuth);
     return h;
   }
 
@@ -851,6 +853,7 @@
     }
 
     const resultados = [];
+    let diagEjecutado = false;
     // Paso 0: preparación
     const s0 = nuevoPaso(`Preparando ${planes.length} tab(s) a procesar`, `Total ${totalAlumnos} alumno(s) · modo ${modo}`);
     s0.ok();
@@ -863,6 +866,26 @@
         if (!r || !r.ok) {
           s.err(explicarError(r));
           console.error(`importar_estudiantes "${plan.tab}" falló:`, r);
+          // Si es un forbidden, tiramos el diagnóstico de auth una sola vez.
+          if (r && r.error === "forbidden" && !diagEjecutado) {
+            diagEjecutado = true;
+            const sDiag = nuevoPaso("Diagnosticando la password", "comparando browser ↔ Apps Script");
+            try {
+              const d = await API.debugAuth(pw);
+              if (d && d.match) {
+                sDiag.ok("las passwords SÍ coinciden — revisá que el admin password del Code.gs esté redeployado en una Versión nueva");
+              } else if (d) {
+                const detalle = d.sent_length !== d.expected_length
+                  ? `distinta longitud (browser=${d.sent_length}, Code.gs=${d.expected_length})`
+                  : `mismo largo, difieren en el índice ${d.first_diff_index}`;
+                sDiag.err(`passwords diferentes: ${detalle} · hacé Salir y volvé a entrar`);
+                console.group("🔐 Diagnóstico de autenticación");
+                console.log("browser preview:", d.sent_preview, "char-codes:", d.sent_charcodes);
+                console.log("Code.gs preview:", d.expected_preview, "char-codes:", d.expected_charcodes);
+                console.groupEnd();
+              }
+            } catch (derr) { sDiag.err(String(derr.message || derr)); }
+          }
         } else {
           const partes = [];
           if (r.agregados) partes.push(`${r.agregados} nuevos`);
@@ -948,6 +971,42 @@
   async function refrescar() {
     API.clearCache();
     await init();
+  }
+
+  // Pregunta al Apps Script cómo se compara la password que tiene el browser
+  // con la que tiene el Code.gs. No la expone: sólo devuelve longitudes,
+  // primera diferencia y char-codes para detectar espacios/caracteres raros.
+  async function ejecutarDiagnosticoAuth() {
+    U.toast("Verificando permisos…", "info");
+    try {
+      const r = await API.debugAuth(pw);
+      console.group("🔐 Diagnóstico de autenticación");
+      console.log("match:", r.match);
+      console.log("browser (sessionStorage) length:", r.sent_length, "preview:", r.sent_preview);
+      console.log("Apps Script CONFIG.ADMIN_PASSWORD length:", r.expected_length, "preview:", r.expected_preview);
+      console.log("Primer índice donde difieren:", r.first_diff_index);
+      console.log("char-codes browser:", r.sent_charcodes);
+      console.log("char-codes Code.gs :", r.expected_charcodes);
+      console.groupEnd();
+      if (r.match) {
+        U.toast("✅ Las passwords coinciden. El problema no es de auth.", "success");
+      } else {
+        const diagnostico = r.sent_length !== r.expected_length
+          ? `Distinta longitud (browser=${r.sent_length}, Code.gs=${r.expected_length}) · probablemente hay un espacio o salto de línea al final de alguna`
+          : `Mismo largo pero difieren en el índice ${r.first_diff_index} · mirá los char-codes en la consola`;
+        alert(
+          "❌ Las passwords NO coinciden.\n\n" + diagnostico +
+          "\n\nSolución habitual:\n" +
+          "  1. Cerrá sesión (botón Salir) y volvé a entrar escribiendo la password de nuevo.\n" +
+          "  2. Abrí el Apps Script y verificá CONFIG.ADMIN_PASSWORD (que no haya espacios/tabs al final).\n" +
+          "  3. Redeployá una versión nueva.\n\n" +
+          "El detalle técnico está en la consola."
+        );
+      }
+    } catch (err) {
+      console.error("debug_auth red:", err);
+      U.toast("No se pudo contactar al Apps Script: " + (err.message || err), "error");
+    }
   }
 
   // ---------- Sociograma ----------

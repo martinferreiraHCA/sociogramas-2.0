@@ -88,6 +88,7 @@ function doPost(e) {
       case "generar_codigos":      return generarCodigos(body);
       case "eliminar_estudiante":  return eliminarEstudiante(body);
       case "importar_estudiantes": return importarEstudiantes(body);
+      case "debug_auth":           return debugAuth(body);
       default:                     return submitRespuestas(body);
     }
   } catch (err) {
@@ -221,6 +222,38 @@ function eliminarEstudiante(body) {
   }
   invalidarCacheLogin();
   return jsonResponse({ ok: true, borrados });
+}
+
+// Diagnóstico sin revelar la password: compara longitudes, first/last char y
+// char codes. No devuelve la password, sólo información suficiente para
+// detectar espacios al final, case mismatch u otros caracteres invisibles.
+function debugAuth(body) {
+  const sent = String((body && body.token_admin) || "");
+  const expected = String(CONFIG.ADMIN_PASSWORD || "");
+  const codesSent = [];
+  const codesExpected = [];
+  for (let i = 0; i < sent.length; i++) codesSent.push(sent.charCodeAt(i));
+  for (let i = 0; i < expected.length; i++) codesExpected.push(expected.charCodeAt(i));
+  const preview = (s) =>
+    s.length <= 3 ? s.replace(/./g, "*")
+    : s.charAt(0) + "***" + s.charAt(s.length - 1) + " [len=" + s.length + "]";
+  return jsonResponse({
+    ok: true,
+    match: sent === expected,
+    sent_length: sent.length,
+    expected_length: expected.length,
+    sent_preview: preview(sent),
+    expected_preview: preview(expected),
+    first_diff_index: firstDiffIndex(sent, expected),
+    sent_charcodes: codesSent,
+    expected_charcodes: codesExpected,
+  });
+}
+
+function firstDiffIndex(a, b) {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) if (a.charCodeAt(i) !== b.charCodeAt(i)) return i;
+  return a.length === b.length ? -1 : n;
 }
 
 function importarEstudiantes(body) {
