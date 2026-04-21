@@ -125,6 +125,7 @@
     root.appendChild(renderStepper(esClase, completadosClase));
     root.appendChild(renderResumen(esClase, resp, completadosClase));
     root.appendChild(wrapId("paso-roster", renderRoster(esClase, completadosClase)));
+    instalarHookDetalleEst(esClase, resp);
     root.appendChild(wrapId("paso-sociograma", renderSociograma(esClase, resp)));
     root.appendChild(wrapId("paso-respuestas", renderDetalle(esClase, resp)));
     root.appendChild(wrapId("paso-grupos", renderGrupos(esClase, resp)));
@@ -1012,18 +1013,33 @@
   // ---------- Sociograma ----------
   function renderSociograma(ests, resp) {
     const c = el("div", { class: "panel-container" });
-    c.innerHTML = `<h3>Sociograma</h3>
-      <div class="sociograma-legend">
-        <span><span class="swatch" style="background:#2e7d32"></span>Verde (afinidad)</span>
-        <span><span class="swatch" style="background:#f9a825"></span>Amarillo (a veces)</span>
-        <span><span class="swatch" style="background:#c62828"></span>Rojo (dificultad)</span>
-        <span class="muted">⚪ Blanco no se muestra</span>
+    c.innerHTML = `
+      <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <h3>Sociograma</h3>
+        <div class="sociograma-filters">
+          <label class="chip chip-filter"><input type="checkbox" class="f-color" data-c="verde" checked> 🟢 Verde</label>
+          <label class="chip chip-filter"><input type="checkbox" class="f-color" data-c="amarillo" checked> 🟡 Amarillo</label>
+          <label class="chip chip-filter"><input type="checkbox" class="f-color" data-c="rojo" checked> 🔴 Rojo</label>
+          <label class="chip chip-filter"><input type="checkbox" id="f-reciprocos"> ⇄ Sólo recíprocos</label>
+          <label class="chip chip-filter"><input type="checkbox" id="f-focus"> 🎯 Sólo del seleccionado</label>
+        </div>
       </div>
-      <div class="muted mb-12">Las flechas salen del evaluador hacia el evaluado.</div>`;
+      <div class="muted mt-16" style="margin-bottom:10px">Pasá el mouse sobre un alumno para ver su resumen · click para fijarlo · click fuera para soltar.</div>`;
 
     if (!ests.length) { c.appendChild(el("p", { class: "muted" }, "Sin estudiantes.")); return c; }
 
-    const w = 900, h = 600, cx = w/2, cy = h/2, R = Math.min(cx, cy) - 60;
+    const stats = calcularStatsSociograma(ests, resp);
+
+    const layout = el("div", { class: "sociograma-layout" });
+    const svgWrap = el("div", { class: "sociograma-svg-wrap" });
+    const panel = el("div", { class: "sociograma-panel", id: "sociograma-panel" });
+    layout.appendChild(svgWrap);
+    layout.appendChild(panel);
+    c.appendChild(layout);
+
+    panel.innerHTML = panelGlobalHTML(ests, resp, stats);
+
+    const w = 900, h = 600, cx = w/2, cy = h/2, R = Math.min(cx, cy) - 70;
     const pos = {};
     ests.forEach((e, i) => {
       const a = -Math.PI/2 + (2*Math.PI*i)/ests.length;
@@ -1036,29 +1052,66 @@
     svg.setAttribute("class", "sociograma-svg");
     svg.innerHTML = `
       <defs>
-        <marker id="arr-v" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#2e7d32"/></marker>
-        <marker id="arr-a" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#f9a825"/></marker>
-        <marker id="arr-r" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#c62828"/></marker>
+        <marker id="arr-v" markerWidth="7" markerHeight="7" refX="7" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#2e7d32"/></marker>
+        <marker id="arr-a" markerWidth="7" markerHeight="7" refX="7" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#f9a825"/></marker>
+        <marker id="arr-r" markerWidth="7" markerHeight="7" refX="7" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#c62828"/></marker>
       </defs>`;
 
+    // Radio por popularidad (verdes recibidos).
+    const maxVerdes = Math.max(1, ...ests.map(e => stats[e.codigo].in.verde));
+    const radio = (codigo) => {
+      const v = stats[codigo].in.verde;
+      return 14 + Math.round((v / maxVerdes) * 14); // 14..28
+    };
+
+    // Agrupar evaluaciones por par (i→j) para poder detectar recíprocas
+    // y dibujar las flechas ligeramente separadas.
+    const byPair = {};
     resp.forEach(r => {
       if (Number(r.numero_pregunta) !== 1) return;
       const k = U.colorOpcionAfinidad(r.opcion_texto).key;
       if (!k || k === "blanco") return;
-      const p1 = pos[String(r.codigo).trim()], p2 = pos[String(r.evaluado_codigo).trim()];
-      if (!p1 || !p2) return;
+      const from = String(r.codigo).trim();
+      const to = String(r.evaluado_codigo).trim();
+      if (!pos[from] || !pos[to]) return;
+      const key = `${from}|${to}`;
+      if (!byPair[key]) byPair[key] = [];
+      byPair[key].push(k);
+    });
+
+    const arrows = [];
+    Object.keys(byPair).forEach(key => {
+      const [from, to] = key.split("|");
+      const reciprocal = !!byPair[`${to}|${from}`];
+      // Usamos el peor color (rojo > amarillo > verde) como dominante por dirección.
+      const colores = byPair[key];
+      const k = colores.includes("rojo") ? "rojo" : colores.includes("amarillo") ? "amarillo" : "verde";
+      arrows.push({ from, to, k, reciprocal, count: colores.length });
+    });
+
+    arrows.forEach(a => {
+      const p1 = pos[a.from], p2 = pos[a.to];
       const dx = p2.x - p1.x, dy = p2.y - p1.y;
       const len = Math.sqrt(dx*dx + dy*dy) || 1;
-      const x2 = p2.x - (dx/len)*22, y2 = p2.y - (dy/len)*22;
-      const color = k === "verde" ? "#2e7d32" : k === "amarillo" ? "#f9a825" : "#c62828";
-      const m = k === "verde" ? "arr-v" : k === "amarillo" ? "arr-a" : "arr-r";
+      const ux = dx/len, uy = dy/len;
+      // Offset perpendicular si hay recíproca, para que se vean ambas flechas.
+      const off = a.reciprocal ? 4 : 0;
+      const px = -uy * off, py = ux * off;
+      const x1 = p1.x + ux * (radio(a.from) + 2) + px;
+      const y1 = p1.y + uy * (radio(a.from) + 2) + py;
+      const x2 = p2.x - ux * (radio(a.to) + 6) + px;
+      const y2 = p2.y - uy * (radio(a.to) + 6) + py;
+      const color = a.k === "verde" ? "#2e7d32" : a.k === "amarillo" ? "#f9a825" : "#c62828";
+      const m = a.k === "verde" ? "arr-v" : a.k === "amarillo" ? "arr-a" : "arr-r";
       const line = document.createElementNS(svgNS, "line");
-      line.setAttribute("x1", p1.x); line.setAttribute("y1", p1.y);
-      line.setAttribute("x2", x2);   line.setAttribute("y2", y2);
+      line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+      line.setAttribute("x2", x2); line.setAttribute("y2", y2);
       line.setAttribute("stroke", color);
-      line.setAttribute("stroke-opacity", "0.55");
-      line.setAttribute("stroke-width", k === "rojo" ? 1.6 : 1.2);
+      line.setAttribute("stroke-width", a.k === "rojo" ? 2.2 : (a.k === "verde" ? 1.8 : 1.4));
       line.setAttribute("marker-end", `url(#${m})`);
+      line.setAttribute("class", `socio-arrow socio-arrow-${a.k} ${a.reciprocal ? "socio-arrow-mutuo" : ""}`);
+      line.setAttribute("data-from", a.from);
+      line.setAttribute("data-to", a.to);
       svg.appendChild(line);
     });
 
@@ -1067,86 +1120,400 @@
       const p = pos[e.codigo];
       const g = document.createElementNS(svgNS, "g");
       g.setAttribute("transform", `translate(${p.x},${p.y})`);
+      g.setAttribute("class", "socio-node");
+      g.setAttribute("data-codigo", e.codigo);
+
+      // Halo (aparece en hover/selección via CSS)
+      const halo = document.createElementNS(svgNS, "circle");
+      halo.setAttribute("r", radio(e.codigo) + 6);
+      halo.setAttribute("class", "socio-halo");
+      halo.setAttribute("fill", "none");
+      g.appendChild(halo);
+
       const circle = document.createElementNS(svgNS, "circle");
-      circle.setAttribute("r", "18");
-      circle.setAttribute("fill", codigosCompl.has(e.codigo) ? "#4CAF50" : "#bdbdbd");
+      circle.setAttribute("r", radio(e.codigo));
+      circle.setAttribute("fill", codigosCompl.has(e.codigo) ? "url(#node-grad)" : "#bdbdbd");
       circle.setAttribute("stroke", "#fff");
-      circle.setAttribute("stroke-width", "2");
+      circle.setAttribute("stroke-width", "2.5");
       g.appendChild(circle);
+
       const txt = document.createElementNS(svgNS, "text");
-      txt.setAttribute("y", "34");
+      txt.setAttribute("y", radio(e.codigo) + 16);
       txt.setAttribute("text-anchor", "middle");
       txt.setAttribute("font-size", "12");
+      txt.setAttribute("font-weight", "500");
       txt.setAttribute("fill", "#222");
-      txt.textContent = (e.nombre || "").split(" ")[0];
+      txt.textContent = primerNombre(e.nombre);
       g.appendChild(txt);
-      const title = document.createElementNS(svgNS, "title");
-      title.textContent = e.nombre + (codigosCompl.has(e.codigo) ? " (completado)" : " (pendiente)");
-      g.appendChild(title);
+
+      const countVerdes = stats[e.codigo].in.verde;
+      if (countVerdes > 0) {
+        const badge = document.createElementNS(svgNS, "text");
+        badge.setAttribute("text-anchor", "middle");
+        badge.setAttribute("font-size", "11");
+        badge.setAttribute("font-weight", "700");
+        badge.setAttribute("fill", "#fff");
+        badge.setAttribute("y", "4");
+        badge.textContent = String(countVerdes);
+        g.appendChild(badge);
+      }
+
       svg.appendChild(g);
     });
 
-    c.appendChild(svg);
+    // Gradiente para nodos completados.
+    const defs = svg.querySelector("defs");
+    defs.insertAdjacentHTML("beforeend", `
+      <radialGradient id="node-grad" cx="40%" cy="40%" r="60%">
+        <stop offset="0%" stop-color="#66bb6a"/>
+        <stop offset="100%" stop-color="#2e7d32"/>
+      </radialGradient>
+    `);
+
+    svgWrap.appendChild(svg);
+
+    // ---------- Interacciones ----------
+    let seleccionado = null; // codigo pinned
+    let hovered = null;
+
+    function aplicarEstado() {
+      const activo = seleccionado || hovered;
+      const filtros = {
+        verde: c.querySelector('.f-color[data-c="verde"]').checked,
+        amarillo: c.querySelector('.f-color[data-c="amarillo"]').checked,
+        rojo: c.querySelector('.f-color[data-c="rojo"]').checked,
+        soloReciprocos: c.querySelector("#f-reciprocos").checked,
+        soloDelActivo: c.querySelector("#f-focus").checked && !!activo,
+      };
+      svg.querySelectorAll(".socio-arrow").forEach(ln => {
+        const k = ln.classList.contains("socio-arrow-verde") ? "verde"
+               : ln.classList.contains("socio-arrow-amarillo") ? "amarillo" : "rojo";
+        const from = ln.getAttribute("data-from");
+        const to = ln.getAttribute("data-to");
+        const mutuo = ln.classList.contains("socio-arrow-mutuo");
+        const tocadoXActivo = activo && (from === activo || to === activo);
+        const pasaFiltro =
+          filtros[k] &&
+          (!filtros.soloReciprocos || mutuo) &&
+          (!filtros.soloDelActivo || tocadoXActivo);
+        ln.classList.toggle("hidden-arrow", !pasaFiltro);
+        ln.classList.toggle("dim", !!activo && !tocadoXActivo);
+        ln.classList.toggle("hl-in",  !!activo && to === activo);
+        ln.classList.toggle("hl-out", !!activo && from === activo);
+      });
+      svg.querySelectorAll(".socio-node").forEach(n => {
+        const cod = n.getAttribute("data-codigo");
+        n.classList.toggle("dim", !!activo && cod !== activo && !isNeighbor(cod, activo));
+        n.classList.toggle("sel", seleccionado === cod);
+        n.classList.toggle("hover", hovered === cod && !seleccionado);
+      });
+      if (activo) panel.innerHTML = panelEstudianteHTML(activo, ests, resp, stats);
+      else panel.innerHTML = panelGlobalHTML(ests, resp, stats);
+    }
+
+    function isNeighbor(a, b) {
+      if (!a || !b) return false;
+      return !!byPair[`${a}|${b}`] || !!byPair[`${b}|${a}`];
+    }
+
+    svg.querySelectorAll(".socio-node").forEach(n => {
+      const cod = n.getAttribute("data-codigo");
+      n.addEventListener("mouseenter", () => { if (!seleccionado) { hovered = cod; aplicarEstado(); } });
+      n.addEventListener("mouseleave", () => { if (!seleccionado) { hovered = null; aplicarEstado(); } });
+      n.addEventListener("click", (e) => {
+        e.stopPropagation();
+        seleccionado = seleccionado === cod ? null : cod;
+        aplicarEstado();
+      });
+    });
+    svg.addEventListener("click", (e) => {
+      if (e.target === svg) { seleccionado = null; aplicarEstado(); }
+    });
+    c.querySelectorAll(".f-color, #f-reciprocos, #f-focus").forEach(inp => {
+      inp.addEventListener("change", aplicarEstado);
+    });
+
+    aplicarEstado();
     return c;
+  }
+
+  function primerNombre(s) {
+    const tokens = String(s || "").split(/\s+/).filter(Boolean);
+    // "Felipe Darío Álvarez Bidegain" → "Felipe"
+    return tokens[0] || "";
+  }
+
+  function calcularStatsSociograma(ests, resp) {
+    const base = () => ({ verde: 0, amarillo: 0, rojo: 0, blanco: 0 });
+    const stats = {};
+    ests.forEach(e => { stats[e.codigo] = { in: base(), out: base() }; });
+    resp.forEach(r => {
+      if (Number(r.numero_pregunta) !== 1) return;
+      const k = U.colorOpcionAfinidad(r.opcion_texto).key;
+      if (!k) return;
+      const from = String(r.codigo).trim();
+      const to = String(r.evaluado_codigo).trim();
+      if (stats[from]) stats[from].out[k]++;
+      if (stats[to])   stats[to].in[k]++;
+    });
+    return stats;
+  }
+
+  function statChipsHTML(obj) {
+    return [
+      ["verde", "🟢", obj.verde, "chip-ok"],
+      ["amarillo", "🟡", obj.amarillo, "chip-warn"],
+      ["rojo", "🔴", obj.rojo, "chip-err"],
+      ["blanco", "⚪", obj.blanco, "chip-gray"],
+    ].filter(x => x[2] > 0).map(([_,icon,n,cls]) => `<span class="chip ${cls}">${icon} ${n}</span>`).join("");
+  }
+
+  function panelGlobalHTML(ests, resp, stats) {
+    const totIn = { verde: 0, amarillo: 0, rojo: 0, blanco: 0 };
+    ests.forEach(e => { for (const k in totIn) totIn[k] += stats[e.codigo].in[k]; });
+    // Top 3 populares.
+    const tops = ests.slice().sort((a, b) => stats[b.codigo].in.verde - stats[a.codigo].in.verde).slice(0, 3);
+    const conflictivos = ests.slice().sort((a, b) => stats[b.codigo].in.rojo - stats[a.codigo].in.rojo).filter(e => stats[e.codigo].in.rojo > 0).slice(0, 3);
+    return `
+      <div class="socio-panel-head">Resumen de la clase</div>
+      <div class="chip-row">${statChipsHTML(totIn)}</div>
+      <div class="muted mt-16" style="margin-top:10px">Evaluaciones totales recibidas en la pregunta de afinidad.</div>
+      <h5 class="socio-panel-title">🌟 Más elegidos</h5>
+      ${tops.length ? `<ul class="socio-panel-list">${tops.map(e => `<li><b>${U.escapeHtml(e.nombre)}</b> · 🟢 ${stats[e.codigo].in.verde}</li>`).join("")}</ul>` : '<div class="muted">Todavía no hay respuestas.</div>'}
+      ${conflictivos.length ? `
+        <h5 class="socio-panel-title">⚠️ Con más rojos recibidos</h5>
+        <ul class="socio-panel-list">${conflictivos.map(e => `<li><b>${U.escapeHtml(e.nombre)}</b> · 🔴 ${stats[e.codigo].in.rojo}</li>`).join("")}</ul>
+      ` : ""}`;
+  }
+
+  function panelEstudianteHTML(codigo, ests, resp, stats) {
+    const e = ests.find(x => x.codigo === codigo);
+    if (!e) return "";
+    const st = stats[codigo];
+    const quienes = reunirAfinidadesHaciaEstudiante(codigo, ests, resp);
+    const recibeDe = (k) => quienes.filter(q => q.k === k).map(q => q.nombre);
+    return `
+      <div class="socio-panel-head">
+        <div class="socio-panel-nombre">${U.escapeHtml(e.nombre)}</div>
+        <div class="muted">Código: <code>${U.escapeHtml(e.codigo)}</code></div>
+      </div>
+      <h5 class="socio-panel-title">📥 Lo que recibe</h5>
+      <div class="chip-row">${statChipsHTML(st.in) || '<span class="muted">aún sin datos</span>'}</div>
+      ${recibeDe("verde").length ? `<div class="socio-recibido"><span class="chip chip-ok">🟢</span> ${recibeDe("verde").slice(0,6).map(n => U.escapeHtml(n)).join(", ")}${recibeDe("verde").length > 6 ? " +" + (recibeDe("verde").length - 6) : ""}</div>` : ""}
+      ${recibeDe("amarillo").length ? `<div class="socio-recibido"><span class="chip chip-warn">🟡</span> ${recibeDe("amarillo").slice(0,6).map(n => U.escapeHtml(n)).join(", ")}${recibeDe("amarillo").length > 6 ? " +" + (recibeDe("amarillo").length - 6) : ""}</div>` : ""}
+      ${recibeDe("rojo").length ? `<div class="socio-recibido"><span class="chip chip-err">🔴</span> ${recibeDe("rojo").slice(0,6).map(n => U.escapeHtml(n)).join(", ")}${recibeDe("rojo").length > 6 ? " +" + (recibeDe("rojo").length - 6) : ""}</div>` : ""}
+      <h5 class="socio-panel-title">📤 Lo que dio</h5>
+      <div class="chip-row">${statChipsHTML(st.out) || '<span class="muted">aún sin datos</span>'}</div>
+      <div class="mt-16" style="margin-top:14px">
+        <button class="btn btn-blue btn-sm" onclick='window.__abrirDetalleEst && window.__abrirDetalleEst("${U.escapeHtml(codigo)}")'>Ver detalle completo →</button>
+      </div>`;
+  }
+
+  function reunirAfinidadesHaciaEstudiante(codigo, ests, resp) {
+    const nomIdx = {}; ests.forEach(e => nomIdx[e.codigo] = e.nombre);
+    const out = [];
+    resp.forEach(r => {
+      if (Number(r.numero_pregunta) !== 1) return;
+      const to = String(r.evaluado_codigo).trim();
+      if (to !== codigo) return;
+      const k = U.colorOpcionAfinidad(r.opcion_texto).key;
+      if (!k) return;
+      out.push({ k, codigo: r.codigo, nombre: nomIdx[r.codigo] || r.nombre || r.codigo });
+    });
+    return out;
   }
 
   // ---------- Detalle por estudiante ----------
   function renderDetalle(ests, resp) {
     const c = el("div", { class: "panel-container" });
-    c.innerHTML = `<h3>Respuestas recibidas por cada estudiante</h3>`;
+    c.innerHTML = `
+      <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <h3>Respuestas por estudiante</h3>
+        <input type="text" id="filtro-estudiantes" placeholder="🔎 Buscar por nombre…" style="max-width:260px" />
+      </div>
+      <div class="muted mt-16" style="margin-bottom:10px">Click en una tarjeta para ver el detalle completo de lo que recibió y lo que dio.</div>
+      <div id="detalle-grid" class="detalle-grid"></div>
+    `;
+
     if (!ests.length) { c.appendChild(el("p", { class: "muted" }, "Sin estudiantes.")); return c; }
 
-    const recibidasPorEvaluado = {};
-    resp.forEach(r => {
-      const ev = String(r.evaluado_codigo || "").trim();
-      if (!ev) return;
-      (recibidasPorEvaluado[ev] = recibidasPorEvaluado[ev] || []).push(r);
+    const stats = calcularStatsSociograma(ests, resp);
+    const codigosCompl = new Set(completados.map(x => String(x.codigo).trim()));
+    const grid = c.querySelector("#detalle-grid");
+
+    const ordenados = ests.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+    ordenados.forEach(e => {
+      const st = stats[e.codigo];
+      const totalIn = st.in.verde + st.in.amarillo + st.in.rojo + st.in.blanco;
+      const card = el("div", { class: "detalle-card" });
+      card.dataset.nombre = e.nombre.toLowerCase();
+      const completo = codigosCompl.has(e.codigo);
+      card.innerHTML = `
+        <div class="detalle-card-head">
+          <div>
+            <div class="detalle-card-nombre">${U.escapeHtml(e.nombre)}</div>
+            <div class="muted">${U.escapeHtml(e.codigo)} · ${completo ? '✓ completó' : 'pendiente'}</div>
+          </div>
+          <span class="detalle-card-score">${st.in.verde}</span>
+        </div>
+        <div class="detalle-card-bars">
+          ${barHTML("verde",    st.in.verde,    totalIn)}
+          ${barHTML("amarillo", st.in.amarillo, totalIn)}
+          ${barHTML("rojo",     st.in.rojo,     totalIn)}
+          ${barHTML("blanco",   st.in.blanco,   totalIn)}
+        </div>
+        <div class="chip-row">${statChipsHTML(st.in) || '<span class="muted">sin respuestas recibidas</span>'}</div>
+      `;
+      card.addEventListener("click", () => abrirDetalleEstudiante(e.codigo, ests, resp));
+      grid.appendChild(card);
     });
 
-    const ul = el("div", { class: "list-card mt-16" });
-    ests.forEach(e => {
-      const item = el("div", { class: "item", style: "flex-direction:column;align-items:flex-start" });
-      item.appendChild(el("div", { style: "font-weight:600;font-size:1.05em" }, e.nombre));
-      item.appendChild(el("div", { class: "muted" }, `Código: ${e.codigo}`));
-
-      const recibidas = recibidasPorEvaluado[e.codigo] || [];
-      if (!recibidas.length) {
-        item.appendChild(el("div", { class: "muted mt-16" }, "Aún sin respuestas recibidas."));
-      } else {
-        const byQ = {};
-        recibidas.forEach(r => (byQ[r.numero_pregunta] = byQ[r.numero_pregunta] || []).push(r));
-        const wrap = el("div", { class: "mt-16", style: "width:100%" });
-        Object.keys(byQ).sort((a,b) => Number(a) - Number(b)).forEach(numStr => {
-          const preg = preguntas.find(p => p.numero === Number(numStr));
-          const linea = el("div", { class: "mb-12" });
-          linea.appendChild(el("div", { style: "font-weight:600;color:#1976d2;margin-bottom:4px" },
-            preg ? `${preg.numero}. ${preg.texto}` : `Pregunta ${numStr}`));
-          const contRow = el("div", { class: "flex-row", style: "flex-wrap:wrap" });
-          if (Number(numStr) === 1) {
-            const counts = { verde:0, amarillo:0, rojo:0, blanco:0 };
-            byQ[numStr].forEach(r => {
-              const k = U.colorOpcionAfinidad(r.opcion_texto).key;
-              if (k) counts[k]++;
-            });
-            ["verde","amarillo","rojo","blanco"].forEach(k => {
-              if (!counts[k]) return;
-              contRow.appendChild(el("span", { class: "opcion-" + k, style: "margin-right:6px" }, `${k}: ${counts[k]}`));
-            });
-          } else {
-            byQ[numStr].forEach(r => {
-              const label = r.opcion_texto ? `${r.nombre} · ${r.opcion_texto}` : r.nombre;
-              contRow.appendChild(el("span", { class: "badge badge-done", style: "margin:2px" }, label));
-            });
-          }
-          linea.appendChild(contRow);
-          wrap.appendChild(linea);
-        });
-        item.appendChild(wrap);
-      }
-      ul.appendChild(item);
+    const filtro = c.querySelector("#filtro-estudiantes");
+    filtro.addEventListener("input", () => {
+      const q = filtro.value.toLowerCase().trim();
+      c.querySelectorAll(".detalle-card").forEach(card => {
+        card.style.display = !q || card.dataset.nombre.includes(q) ? "" : "none";
+      });
     });
-    c.appendChild(ul);
+
     return c;
+  }
+
+  function barHTML(k, n, total) {
+    const pct = total ? Math.round((n / total) * 100) : 0;
+    const colors = { verde: "#2e7d32", amarillo: "#f9a825", rojo: "#c62828", blanco: "#9e9e9e" };
+    return `<div class="detalle-bar" title="${k}: ${n}"><div style="width:${pct}%;background:${colors[k]}"></div></div>`;
+  }
+
+  // Modal con el detalle completo de respuestas recibidas y dadas por un
+  // estudiante. Se abre desde el sociograma o desde la grilla de detalle.
+  function abrirDetalleEstudiante(codigo, ests, resp) {
+    const e = ests.find(x => x.codigo === codigo);
+    if (!e) return;
+    const nomIdx = {}; ests.forEach(x => nomIdx[x.codigo] = x.nombre);
+    const recibidas = resp.filter(r => String(r.evaluado_codigo).trim() === codigo);
+    const dadas = resp.filter(r => String(r.codigo).trim() === codigo);
+    const stats = calcularStatsSociograma(ests, resp);
+    const st = stats[codigo];
+
+    const overlay = el("div", { class: "modal-overlay" });
+    const modal = el("div", { class: "modal-card" });
+    modal.innerHTML = `
+      <div class="modal-head">
+        <h3>${U.escapeHtml(e.nombre)}</h3>
+        <button class="modal-close" id="m-cerrar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="est-resumen">
+          <div>
+            <div class="muted">Código</div>
+            <div class="est-resumen-val"><code>${U.escapeHtml(e.codigo)}</code></div>
+          </div>
+          <div>
+            <div class="muted">Recibidos (🟢)</div>
+            <div class="est-resumen-val est-resumen-verde">${st.in.verde}</div>
+          </div>
+          <div>
+            <div class="muted">Rojos recibidos</div>
+            <div class="est-resumen-val est-resumen-rojo">${st.in.rojo}</div>
+          </div>
+          <div>
+            <div class="muted">Completó</div>
+            <div class="est-resumen-val">${dadas.length ? "✅" : "⏳"}</div>
+          </div>
+        </div>
+
+        <div class="est-tabs">
+          <button class="est-tab active" data-tab="recibidas">📥 Lo que recibió (${recibidas.length})</button>
+          <button class="est-tab" data-tab="dadas">📤 Lo que dio (${dadas.length})</button>
+        </div>
+
+        <div id="tab-recibidas" class="est-tab-pane active">
+          ${renderPreguntaPane(recibidas, nomIdx, "recibidas")}
+        </div>
+        <div id="tab-dadas" class="est-tab-pane">
+          ${renderPreguntaPane(dadas, nomIdx, "dadas")}
+        </div>
+      </div>
+      <div class="modal-foot">
+        <div class="muted">Click fuera del modal para cerrar.</div>
+        <button class="btn btn-gray" id="m-cerrar2">Cerrar</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const cerrar = () => overlay.remove();
+    modal.querySelector("#m-cerrar").addEventListener("click", cerrar);
+    modal.querySelector("#m-cerrar2").addEventListener("click", cerrar);
+    overlay.addEventListener("click", (ev) => { if (ev.target === overlay) cerrar(); });
+
+    modal.querySelectorAll(".est-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        modal.querySelectorAll(".est-tab").forEach(b => b.classList.remove("active"));
+        modal.querySelectorAll(".est-tab-pane").forEach(p => p.classList.remove("active"));
+        btn.classList.add("active");
+        modal.querySelector(`#tab-${btn.dataset.tab}`).classList.add("active");
+      });
+    });
+  }
+
+  // Hook global para poder llamar abrirDetalleEstudiante desde el HTML del
+  // panel del sociograma (onclick inline).
+  function instalarHookDetalleEst(ests, resp) {
+    window.__abrirDetalleEst = (codigo) => abrirDetalleEstudiante(codigo, ests, resp);
+  }
+
+  function renderPreguntaPane(items, nomIdx, modo) {
+    if (!items.length) return '<div class="muted" style="padding:20px;text-align:center">Sin datos todavía.</div>';
+    const byQ = {};
+    items.forEach(r => (byQ[r.numero_pregunta] = byQ[r.numero_pregunta] || []).push(r));
+    return Object.keys(byQ).sort((a, b) => Number(a) - Number(b)).map(numStr => {
+      const preg = preguntas.find(p => p.numero === Number(numStr));
+      const n = Number(numStr);
+      // Nombre de compañero relevante (el evaluado si estamos mostrando "dadas",
+      // el evaluador si estamos mostrando "recibidas").
+      const nombreDe = (r) => modo === "recibidas"
+        ? (nomIdx[String(r.codigo).trim()] || r.nombre || r.codigo)
+        : (nomIdx[String(r.evaluado_codigo).trim()] || r.evaluado_nombre || r.evaluado_codigo);
+
+      if (n === 1) {
+        // Agrupar por compañero con su color.
+        const porCompa = {};
+        byQ[numStr].forEach(r => {
+          const nombre = nombreDe(r);
+          const k = U.colorOpcionAfinidad(r.opcion_texto).key;
+          if (!porCompa[nombre]) porCompa[nombre] = { nombre, colores: [] };
+          if (k) porCompa[nombre].colores.push(k);
+        });
+        const orden = ["verde", "amarillo", "rojo", "blanco"];
+        const filas = Object.values(porCompa).sort((a, b) => {
+          const ka = a.colores[0] || "zzz", kb = b.colores[0] || "zzz";
+          const ia = orden.indexOf(ka), ib = orden.indexOf(kb);
+          return (ia < 0 ? 9 : ia) - (ib < 0 ? 9 : ib);
+        });
+        return `
+          <div class="est-preg">
+            <div class="est-preg-title">${preg ? preg.numero + ". " + U.escapeHtml(preg.texto) : "Pregunta " + numStr}</div>
+            <div class="est-preg-grid">
+              ${filas.map(row => `<div class="est-preg-row">
+                <div>${U.escapeHtml(row.nombre)}</div>
+                <div>${row.colores.map(k => `<span class="opcion-${k}">${k}</span>`).join(" ")}</div>
+              </div>`).join("")}
+            </div>
+          </div>`;
+      }
+      return `
+        <div class="est-preg">
+          <div class="est-preg-title">${preg ? preg.numero + ". " + U.escapeHtml(preg.texto) : "Pregunta " + numStr}</div>
+          <div class="chip-row">
+            ${byQ[numStr].map(r => {
+              const nm = nombreDe(r);
+              const opc = r.opcion_texto ? ` · ${U.escapeHtml(r.opcion_texto)}` : "";
+              return `<span class="chip chip-info">${U.escapeHtml(nm)}${opc}</span>`;
+            }).join("")}
+          </div>
+        </div>`;
+    }).join("");
   }
 
   // ---------- Armado de grupos ----------
