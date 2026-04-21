@@ -1568,6 +1568,7 @@
         <div class="grupos-config-actions">
           <button class="btn btn-blue" id="btn-auto">🎯 Generar grupos</button>
           <button class="btn btn-gray btn-sm" id="btn-regenerar" title="Vuelve a correr con los mismos parámetros">🔄 Regenerar</button>
+          <button class="btn btn-green btn-sm" id="btn-alternativas" title="Corre el algoritmo con varias estrategias y compará los resultados">🔬 Explorar alternativas</button>
         </div>
       </div>
 
@@ -1599,6 +1600,7 @@
     };
     c.querySelector("#btn-auto").addEventListener("click", generar);
     c.querySelector("#btn-regenerar").addEventListener("click", generar);
+    c.querySelector("#btn-alternativas").addEventListener("click", () => abrirModalAlternativas(ests, resp));
     c.querySelector("#btn-add-grupo").addEventListener("click", () => {
       const n = prompt("Nombre del grupo", `Grupo ${(gruposLocal?.length || 0) + 1}`);
       if (!n) return;
@@ -1656,16 +1658,147 @@
 
     tablero.appendChild(makeGrupoCard({ nombre: "Sin asignar", codigos: sinAsignar, isPool: true }, estIdx, -1));
     gruposLocal.forEach((g, i) => {
-      const warn = resultadoAlgoritmo && resultadoAlgoritmo.grupos[i] ? resultadoAlgoritmo.grupos[i].warnings : [];
-      tablero.appendChild(makeGrupoCard(g, estIdx, i, warn));
+      // El análisis (líder, relaciones internas, fit) se sincroniza por posición
+      // con `resultadoAlgoritmo.grupos[i]`. Si el usuario editó a mano, el análisis
+      // puede quedar desactualizado hasta la próxima regeneración.
+      const analisis = resultadoAlgoritmo && resultadoAlgoritmo.grupos[i] ? resultadoAlgoritmo.grupos[i] : null;
+      tablero.appendChild(makeGrupoCard(g, estIdx, i, analisis));
     });
 
     return c;
   }
 
-  function makeGrupoCard(g, estIdx, gruposIndex, warnings) {
-    const tieneRojoMutuo = (warnings || []).some(w => w.startsWith("Rojo mutuo"));
-    const tieneWarn = !!(warnings && warnings.length) && !tieneRojoMutuo;
+  // Ejecuta formarGrupos con varias combinaciones estrategia × prioridad
+  // y muestra los resultados side-by-side para comparar y elegir uno.
+  function abrirModalAlternativas(ests, resp) {
+    const tamGrupo = parseInt(document.querySelector("#tam-grupo")?.value, 10) || 4;
+    const permitir = document.querySelector("#permitir-rojo")?.checked;
+    const base = { tamGrupo, permitirRojoMutuo: permitir };
+
+    const COMBOS = [
+      { label: "Balanceado · evitar conflictos", estrategia: "automatico", prioridad: "evitar_conflictos", hint: "Default robusto" },
+      { label: "Balanceado · maximizar colaboración", estrategia: "balanceado", prioridad: "maximizar_colaboracion", hint: "Privilegia verdes mutuos" },
+      { label: "Liderazgo · desarrollar líderes", estrategia: "liderazgo", prioridad: "desarrollar_liderazgo", hint: "Un referente por grupo" },
+      { label: "Inclusión · integrar aislados", estrategia: "inclusion", prioridad: "integrar_aislados", hint: "Separa vulnerables entre grupos" },
+      { label: "Homogéneo · niveles parejos", estrategia: "homogeneo", prioridad: "evitar_conflictos", hint: "Grupos con perfiles similares" },
+      { label: "Colaboración intensa", estrategia: "automatico", prioridad: "maximizar_colaboracion", hint: "Arranca seguro, premia verdes" },
+    ];
+
+    const overlay = el("div", { class: "modal-overlay" });
+    const modal = el("div", { class: "modal-card", style: "max-width:1100px" });
+    modal.innerHTML = `
+      <div class="modal-head">
+        <h3>🔬 Explorar alternativas</h3>
+        <button class="modal-close" id="m-cerrar">×</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted mb-12">Se corrieron ${COMBOS.length} combinaciones. Cada card resume cohesión, conflictos y balance. Click en <b>Aplicar</b> para usar esa composición.</p>
+        <div class="alt-grid" id="alt-grid"></div>
+      </div>
+      <div class="modal-foot">
+        <div class="muted" id="alt-info">Pasá el mouse sobre una card para ver detalle.</div>
+        <button class="btn btn-gray" id="m-cerrar2">Cerrar</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const cerrar = () => overlay.remove();
+    modal.querySelector("#m-cerrar").addEventListener("click", cerrar);
+    modal.querySelector("#m-cerrar2").addEventListener("click", cerrar);
+    overlay.addEventListener("click", (ev) => { if (ev.target === overlay) cerrar(); });
+
+    const grid = modal.querySelector("#alt-grid");
+    const info = modal.querySelector("#alt-info");
+
+    // Corremos cada combo. Es sync (la JS corre en el mismo tick) pero
+    // generamos cards progresivamente con un pequeño yield visual.
+    const resultados = [];
+    COMBOS.forEach((c, idx) => {
+      const placeholder = el("div", { class: "alt-card loading" });
+      placeholder.innerHTML = `<div class="alt-card-head"><b>${U.escapeHtml(c.label)}</b></div><div class="muted">Calculando…</div>`;
+      grid.appendChild(placeholder);
+      setTimeout(() => {
+        try {
+          const r = GROUPS.formarGrupos(ests, resp, opciones, Object.assign({}, base, { estrategia: c.estrategia, prioridad: c.prioridad }));
+          resultados[idx] = r;
+          grid.replaceChild(renderAltCard(c, r, () => aplicarAlternativa(r, cerrar), info), placeholder);
+        } catch (err) {
+          console.error("alternativa falló:", err);
+          placeholder.innerHTML = `<div class="alt-card-head"><b>${U.escapeHtml(c.label)}</b></div><div class="text-error">Error: ${U.escapeHtml(err.message || String(err))}</div>`;
+        }
+      }, idx * 30);
+    });
+  }
+
+  function renderAltCard(combo, r, onAplicar, info) {
+    const card = el("div", { class: "alt-card" });
+    const rm = r.resumen.rojosMutuosInternos;
+    const score = r.resumen.scoreTotal;
+    const tamanos = r.resumen.tamanos;
+    const aislados = r.resumen.aislados || [];
+    // Agregar rel interna total para calcular indicadores generales.
+    let verdeMutuo = 0, verdeUni = 0, amarillo = 0, rojo = 0, blanco = 0;
+    r.grupos.forEach((g) => {
+      const rel = g.relacionesInternas;
+      if (!rel) return;
+      verdeMutuo += rel.verdeMutuo; verdeUni += rel.verdeUnilateral;
+      amarillo += rel.amarillo; rojo += rel.rojo; blanco += rel.blanco;
+    });
+    const totalRel = verdeMutuo + verdeUni + amarillo + rojo + blanco;
+    const statusCls = rojo > 0 ? "alt-err" : (score > 0 ? "alt-ok" : "alt-neu");
+
+    const lideres = r.grupos.filter(g => !!g.lider).length;
+    card.className = "alt-card " + statusCls;
+    card.innerHTML = `
+      <div class="alt-card-head">
+        <div>
+          <div class="alt-card-title">${U.escapeHtml(combo.label)}</div>
+          <div class="muted">${U.escapeHtml(combo.hint)}</div>
+        </div>
+        <div class="alt-card-score">${score.toFixed(0)}</div>
+      </div>
+      <div class="alt-stats">
+        <div><span class="muted">Rojos</span><span class="${rojo>0?'text-error':''}"> ${rojo}</span></div>
+        <div><span class="muted">Verdes mutuos</span><span style="color:#2e7d32"> ${verdeMutuo}</span></div>
+        <div><span class="muted">Verdes unilat.</span><span> ${verdeUni}</span></div>
+        <div><span class="muted">Con líder</span><span> ${lideres}/${r.grupos.length}</span></div>
+      </div>
+      ${totalRel > 0 ? `
+        <div class="grupo-rel-bar" style="margin-top:10px">
+          ${verdeMutuo ? `<div class="rel-seg rel-vm" style="flex:${verdeMutuo}">${verdeMutuo}</div>` : ""}
+          ${verdeUni ? `<div class="rel-seg rel-vu" style="flex:${verdeUni}">${verdeUni}</div>` : ""}
+          ${amarillo ? `<div class="rel-seg rel-am" style="flex:${amarillo}">${amarillo}</div>` : ""}
+          ${rojo ? `<div class="rel-seg rel-ro" style="flex:${rojo}">${rojo}</div>` : ""}
+          ${blanco ? `<div class="rel-seg rel-bl" style="flex:${blanco}">${blanco}</div>` : ""}
+        </div>` : ""}
+      <div class="alt-tamanos">Tamaños: ${tamanos.join(" · ")}${aislados.length ? ` · ${aislados.length} aislados` : ""}</div>
+      <div class="alt-actions">
+        <button class="btn btn-blue btn-sm">Aplicar esta composición</button>
+      </div>
+    `;
+    card.querySelector(".alt-actions button").addEventListener("click", onAplicar);
+    card.addEventListener("mouseenter", () => {
+      info.innerHTML = `Estrategia <b>${U.escapeHtml(combo.estrategia)}</b> · prioridad <b>${U.escapeHtml(combo.prioridad)}</b> · score ${score.toFixed(1)}`;
+    });
+    return card;
+  }
+
+  function aplicarAlternativa(r, cerrar) {
+    resultadoAlgoritmo = r;
+    gruposLocal = r.grupos.map(g => ({ nombre: g.nombre, codigos: [...g.codigos] }));
+    guardarBorrador();
+    cerrar();
+    U.toast("Alternativa aplicada (borrador local guardado)", "success");
+    render();
+    // Scroll suave al panel de grupos.
+    const target = document.getElementById("paso-grupos");
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function makeGrupoCard(g, estIdx, gruposIndex, analisis) {
+    const warnings = (analisis && analisis.warnings) || [];
+    const tieneRojoMutuo = warnings.some(w => w.startsWith("Rojo mutuo"));
+    const tieneWarn = warnings.length > 0 && !tieneRojoMutuo;
     let statusCls = "";
     let statusLabel = "";
     if (!g.isPool) {
@@ -1675,9 +1808,11 @@
     }
     const card = el("div", { class: "grupo-card " + statusCls });
     const head = el("div", { class: "flex-row", style: "justify-content:space-between;align-items:flex-start" });
+    const lider = analisis && analisis.lider;
     const title = el("div", null, [
       el("h4", null, `${g.nombre}${g.isPool ? "" : ` (${g.codigos.length})`}`),
       statusLabel ? el("div", { class: "grupo-status " + statusCls }, statusLabel) : null,
+      lider ? el("div", { class: "grupo-lider", html: `👑 <b>${U.escapeHtml(lider.nombre)}</b> · referente` }) : null,
     ]);
     head.appendChild(title);
     if (!g.isPool) {
@@ -1694,10 +1829,48 @@
     }
     card.appendChild(head);
 
+    // Barra horizontal apilada con las relaciones internas.
+    const rel = analisis && analisis.relacionesInternas;
+    if (rel && rel.total > 0) {
+      const seg = (n, cls, lbl) => n > 0
+        ? `<div class="rel-seg rel-${cls}" style="flex:${n}" title="${lbl}: ${n}">${n}</div>`
+        : "";
+      const bar = el("div", { class: "grupo-rel-bar mt-16", html: `
+        ${seg(rel.verdeMutuo, "vm", "Verde mutuo")}
+        ${seg(rel.verdeUnilateral, "vu", "Verde unilateral")}
+        ${seg(rel.amarillo, "am", "Amarillo")}
+        ${seg(rel.rojo, "ro", "Rojo")}
+        ${seg(rel.blanco, "bl", "Sin evaluar")}
+      `});
+      card.appendChild(bar);
+      const leyenda = el("div", { class: "grupo-rel-leyenda" });
+      [
+        ["vm", `${rel.verdeMutuo} 🟢↔`],
+        ["vu", `${rel.verdeUnilateral} 🟢→`],
+        ["am", `${rel.amarillo} 🟡`],
+        ["ro", `${rel.rojo} 🔴`],
+        ["bl", `${rel.blanco} ⚪`],
+      ].forEach(([c, t]) => {
+        leyenda.appendChild(el("span", { class: `rel-tag rel-${c}` }, t));
+      });
+      card.appendChild(leyenda);
+    }
+
+    // Miembros con fit chip.
+    const fitIdx = {};
+    if (analisis && analisis.fitPorMiembro) {
+      analisis.fitPorMiembro.forEach((m) => { fitIdx[m.codigo] = m; });
+    }
     const body = el("div", { class: "mt-16" });
     g.codigos.forEach(co => {
       const est = estIdx[co]; if (!est) return;
-      const chip = el("span", { class: "grupo-estudiante", draggable: "true" }, est.nombre);
+      const m = fitIdx[co];
+      const fitCls = !m ? "" : (m.fit > 0.5 ? "fit-ok" : (m.fit < -0.5 ? "fit-bad" : "fit-neutro"));
+      const tags = [];
+      if (m && m.lider) tags.push(`<span class="mini-tag tag-lider" title="Referente declarado">👑</span>`);
+      if (m && m.apoyo) tags.push(`<span class="mini-tag tag-apoyo" title="Necesita apoyo">🤝</span>`);
+      if (m && m.aislado) tags.push(`<span class="mini-tag tag-aislado" title="Aislado">🫥</span>`);
+      const chip = el("span", { class: "grupo-estudiante " + fitCls, draggable: "true", title: m ? `Fit en el grupo: ${m.fit.toFixed(1)}` : "", html: `${U.escapeHtml(est.nombre)}${tags.length ? " " + tags.join("") : ""}` });
       chip.dataset.codigo = co;
       chip.addEventListener("dragstart", (e) => {
         chip.classList.add("dragging");
@@ -1709,7 +1882,7 @@
     });
     card.appendChild(body);
 
-    if (warnings && warnings.length) {
+    if (warnings.length) {
       const w = el("div", { class: "muted mt-16", style: "font-size:0.85em;color:#b26a00" });
       warnings.forEach(t => w.appendChild(el("div", null, "⚠ " + t)));
       card.appendChild(w);

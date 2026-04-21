@@ -980,3 +980,113 @@ table.data-table tbody tr:hover { background: #fafafa; }
   .sociograma-layout { grid-template-columns: 1fr; }
   .sociograma-panel { min-height: 0; }
 }
+
+/* ---------- Líder y mini-tags en group cards ---------- */
+.grupo-lider {
+  font-size: 0.85em;
+  color: #8d6e00;
+  margin-top: 3px;
+}
+.mini-tag {
+  font-size: 0.75em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.6);
+  margin-left: 2px;
+}
+
+/* ---------- Barra de relaciones internas del grupo ---------- */
+.grupo-rel-bar {
+  display: flex;
+  height: 18px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #f0f0f0;
+  gap: 1px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+.rel-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 4px;
+  transition: flex 0.3s;
+}
+.rel-vm { background: #2e7d32; }
+.rel-vu { background: #66bb6a; }
+.rel-am { background: #f9a825; color: #333; }
+.rel-ro { background: #c62828; }
+.rel-bl { background: #bdbdbd; color: #333; }
+
+.grupo-rel-leyenda {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+}
+.rel-tag {
+  font-size: 0.7em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #f0f0f0;
+  color: #555;
+}
+
+/* ---------- Fit por miembro ---------- */
+.grupo-estudiante.fit-ok     { background: #e8f5e9; border-left: 3px solid #2e7d32; }
+.grupo-estudiante.fit-neutro { background: #f5f5f5; border-left: 3px solid #9e9e9e; }
+.grupo-estudiante.fit-bad    { background: #ffebee; border-left: 3px solid #c62828; }
+
+/* ---------- Explorador de alternativas ---------- */
+.alt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.alt-card {
+  background: #fff;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  transition: all 0.18s;
+}
+.alt-card.loading { opacity: 0.5; }
+.alt-card.alt-ok  { border-color: #c8e6c9; background: linear-gradient(180deg, #f3fbf4 0%, #fff 40%); }
+.alt-card.alt-err { border-color: #ffcdd2; background: linear-gradient(180deg, #fdeeee 0%, #fff 40%); }
+.alt-card.alt-neu { border-color: #e0e0e0; }
+.alt-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+}
+.alt-card-head {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+  margin-bottom: 8px;
+}
+.alt-card-title {
+  font-weight: 600; color: #1976d2; font-size: 0.95em;
+}
+.alt-card-score {
+  font-weight: 700; font-size: 1.5em; color: #2e7d32;
+  line-height: 1;
+}
+.alt-card.alt-err .alt-card-score { color: #c62828; }
+.alt-card.alt-neu .alt-card-score { color: #666; }
+.alt-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+  font-size: 0.88em;
+  color: #333;
+  margin-bottom: 4px;
+}
+.alt-stats > div { display: flex; justify-content: space-between; }
+.alt-stats span.muted { color: #666; }
+.alt-tamanos {
+  margin-top: 8px;
+  font-size: 0.82em;
+  color: #555;
+}
+.alt-actions {
+  margin-top: 10px;
+  display: flex; justify-content: flex-end;
+}

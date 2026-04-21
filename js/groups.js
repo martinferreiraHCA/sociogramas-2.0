@@ -220,22 +220,70 @@
       const codigos = G.miembros.map((m) => students[m].codigo);
       const scoreGrupo = cohesionGrupo(G.miembros, pares);
       const warnings = [];
+
+      // Relaciones internas por par (para visualizaciones).
+      let relVerdeMutuo = 0, relVerdeUni = 0, relAmarillo = 0, relRojo = 0, relBlanco = 0;
       for (let i = 0; i < G.miembros.length; i++) {
         for (let j = i + 1; j < G.miembros.length; j++) {
           const a = G.miembros[i], b = G.miembros[j];
-          if (score[a][b] < 0 && score[b][a] < 0) {
+          const sa = score[a][b], sb = score[b][a];
+          if (sa < 0 && sb < 0) {
+            relRojo++;
             warnings.push(`Rojo mutuo entre ${students[a].nombre} y ${students[b].nombre}`);
+          } else if (sa < 0 || sb < 0) {
+            relRojo++;
+          } else if (sa > 0 && sb > 0) {
+            relVerdeMutuo++;
+          } else if (sa > 0 || sb > 0) {
+            relVerdeUni++;
+          } else if (esAmbivalente(a, b, score, students)) {
+            relAmarillo++;
+          } else {
+            relBlanco++;
           }
         }
       }
       if (G.miembros.every((m) => !esLider(m))) warnings.push("Sin referentes claros (pregunta 7)");
       if (G.miembros.filter(esApoyo).length >= 2) warnings.push("Concentración de alumnos que necesitan más apoyo");
+
+      // Fit por miembro: cuánto suma el alumno al grupo (sum de pares con el
+      // resto / N-1). Sirve para identificar miembros bisagra o en el borde.
+      const fitPorMiembro = G.miembros.map((m) => {
+        let suma = 0, n = 0;
+        G.miembros.forEach((o) => { if (o !== m) { suma += pares[m][o]; n++; } });
+        return {
+          codigo: students[m].codigo,
+          nombre: students[m].nombre,
+          fit: n ? suma / n : 0,
+          lider: esLider(m),
+          apoyo: esApoyo(m),
+          aislado: esAislado(m),
+          popularidad: tag[m].recibePositivo,
+        };
+      }).sort((a, b) => b.fit - a.fit);
+
+      // Líder del grupo: prefer esLider con mayor popularidad, si no hay,
+      // el de mayor popularidad general.
+      const lideresEnGrupo = fitPorMiembro.filter(m => m.lider).sort((a, b) => b.popularidad - a.popularidad);
+      const masPopular = fitPorMiembro.slice().sort((a, b) => b.popularidad - a.popularidad)[0];
+      const lider = lideresEnGrupo[0] || (masPopular && masPopular.popularidad > 0 ? masPopular : null);
+
       return {
         nombre: G.nombre,
         codigos,
         nombres: G.miembros.map((m) => students[m].nombre),
         score: scoreGrupo,
         warnings,
+        lider: lider ? { codigo: lider.codigo, nombre: lider.nombre } : null,
+        relacionesInternas: {
+          verdeMutuo: relVerdeMutuo,
+          verdeUnilateral: relVerdeUni,
+          amarillo: relAmarillo,
+          rojo: relRojo,
+          blanco: relBlanco,
+          total: relVerdeMutuo + relVerdeUni + relAmarillo + relRojo + relBlanco,
+        },
+        fitPorMiembro,
       };
     });
 
@@ -276,6 +324,15 @@
       if (score[cand][m] < 0 && score[m][cand] < 0) return true;
     }
     return false;
+  }
+
+  // ¿El vínculo a↔b tiene al menos una evaluación amarilla (sin verde ni rojo)?
+  // La matriz `score` no distingue colores (sólo el peso sumado), así que
+  // aproximamos: si score[a][b] o score[b][a] está entre W.BLANCO y W.AMARILLO
+  // sin ser 0 exacto, lo consideramos amarillo.
+  function esAmbivalente(a, b, score) {
+    const sa = score[a][b], sb = score[b][a];
+    return (sa > 0 && sa <= 1) || (sb > 0 && sb <= 1);
   }
 
   function cohesionGrupo(mbros, pares) {
