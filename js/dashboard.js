@@ -560,25 +560,49 @@
         </div>
 
         ${tieneGrupos ? `
-          <h4 style="margin-bottom:8px">Elegí qué grupos importar y el nombre del tab destino:</h4>
+          <div class="flex-row" style="justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+            <h4 style="margin:0">Grupos detectados <span class="muted" style="font-weight:400">(click en la tarjeta para seleccionar)</span></h4>
+            <div class="flex-row" style="gap:6px">
+              <button type="button" class="btn btn-gray btn-sm" id="sel-todos">✓ Todos</button>
+              <button type="button" class="btn btn-gray btn-sm" id="sel-ninguno">○ Ninguno</button>
+              <button type="button" class="btn btn-gray btn-sm" id="sel-invertir">⇄ Invertir</button>
+            </div>
+          </div>
           <div class="import-combos">
             ${combos.map((combo, i) => {
               const activos = combo.rows.filter(r => r.activo).length;
-              const inactivos = combo.rows.length - activos;
+              const total = combo.rows.length;
+              const nuevos = combo.rows.filter(r => !codigosClaseActual.has(r.codigo)).length;
+              const yaEnClase = total - nuevos;
               const etiqueta = combo.curso || combo.grupo
-                ? `${U.escapeHtml(combo.curso || "—")} · ${U.escapeHtml(combo.grupo || "—")}`
+                ? `${U.escapeHtml(combo.curso || "—")}°${U.escapeHtml(combo.grupo || "—")}`
+                : "sin clasificar";
+              const subtitulo = combo.curso || combo.grupo
+                ? `Curso ${U.escapeHtml(combo.curso || "—")} · Grupo ${U.escapeHtml(combo.grupo || "—")}`
                 : "(sin curso/grupo en el archivo)";
+              const pctActivos = total ? Math.round((activos / total) * 100) : 0;
+              const checked = (combo.curso || combo.grupo) ? "checked" : "";
               return `
-                <div class="import-combo" data-idx="${i}">
-                  <label class="import-combo-check">
-                    <input type="checkbox" class="combo-sel" data-idx="${i}" ${combo.curso || combo.grupo ? "checked" : ""} />
-                    <div>
-                      <div class="import-combo-title">${etiqueta}</div>
-                      <div class="muted">${activos} activo(s)${inactivos ? ` · ${inactivos} inactivos` : ""}</div>
+                <div class="import-combo ${checked ? "selected" : ""}" data-idx="${i}">
+                  <div class="import-combo-top">
+                    <div class="import-combo-check">
+                      <input type="checkbox" class="combo-sel" data-idx="${i}" ${checked} />
+                      <div class="import-combo-badge">${etiqueta}</div>
                     </div>
-                  </label>
+                    <div class="import-combo-count">${total}</div>
+                  </div>
+                  <div class="import-combo-sub">${subtitulo}</div>
+                  <div class="import-combo-bar" title="Activos vs inactivos">
+                    <div class="import-combo-bar-fill" style="width:${pctActivos}%"></div>
+                  </div>
+                  <div class="import-combo-chips">
+                    <span class="chip chip-ok">✓ ${activos} activos</span>
+                    ${total - activos ? `<span class="chip chip-warn">⏸ ${total - activos} con pase</span>` : ""}
+                    ${yaEnClase ? `<span class="chip chip-info">↻ ${yaEnClase} ya en clase</span>` : ""}
+                    ${nuevos && yaEnClase ? `<span class="chip chip-new">＋ ${nuevos} nuevos</span>` : ""}
+                  </div>
                   <div class="import-combo-tab">
-                    <span class="muted">→ Tab:</span>
+                    <span class="muted">→ Tab destino:</span>
                     <input type="text" class="combo-tab" data-idx="${i}" value="${U.escapeHtml(combo.tab)}" />
                   </div>
                 </div>
@@ -593,30 +617,15 @@
           <div class="muted mb-12">El CSV no trae columnas Curso/Grupo. Escribí a mano cómo se va a llamar el tab en la planilla.</div>
         `}
 
-        <h4 style="margin:14px 0 8px">Vista previa (primeros 200)</h4>
+        <div class="flex-row" style="justify-content:space-between;align-items:flex-end;margin:14px 0 8px;flex-wrap:wrap;gap:8px">
+          <h4 style="margin:0">Vista previa</h4>
+          <div class="muted" id="preview-count"></div>
+        </div>
         <div class="roster-preview">
           <div class="roster-preview-head">
             <div>Nombre</div><div>Código (CI)</div><div>Curso/Grupo</div><div>Estado</div>
           </div>
-          <div class="roster-preview-body">
-            ${filasParseadas.slice(0, 200).map(f => {
-              const estadoLbl = !f.activo
-                ? '<span class="badge badge-closed">con pase</span>'
-                : codigosClaseActual.has(f.codigo)
-                  ? '<span class="badge badge-done">ya en clase</span>'
-                  : '<span class="badge badge-pending">nuevo</span>';
-              const cg = (f.curso || f.grupo) ? `${U.escapeHtml(f.curso || "—")} · ${U.escapeHtml(f.grupo || "—")}` : '<span class="muted">—</span>';
-              return `
-                <div class="roster-preview-row">
-                  <div>${U.escapeHtml(f.nombre)}</div>
-                  <div><code>${U.escapeHtml(f.codigo)}</code></div>
-                  <div>${cg}</div>
-                  <div>${estadoLbl}</div>
-                </div>
-              `;
-            }).join("")}
-            ${filasParseadas.length > 200 ? `<div class="muted mt-16">(mostrando los primeros 200 de ${filasParseadas.length})</div>` : ""}
-          </div>
+          <div class="roster-preview-body" id="preview-body"></div>
         </div>
       </div>
       <div class="modal-foot">
@@ -639,16 +648,94 @@
     const btnOk = modal.querySelector("#modal-ok");
     const soloActivos = () => modal.querySelector("#solo-activos").checked;
 
-    function actualizarResumen() {
+    // Interacciones del selector de combos.
+    function setCombo(idx, on) {
+      const chk = modal.querySelector(`.combo-sel[data-idx="${idx}"]`);
+      if (!chk) return;
+      chk.checked = on;
+      const card = modal.querySelector(`.import-combo[data-idx="${idx}"]`);
+      if (card) card.classList.toggle("selected", on);
+    }
+    modal.querySelectorAll(".import-combo").forEach(card => {
+      const idx = Number(card.dataset.idx);
+      const chk = card.querySelector(".combo-sel");
+      const tabInput = card.querySelector(".combo-tab");
+      // Click en cualquier parte de la card toggle-a (excepto el input del tab).
+      card.addEventListener("click", (e) => {
+        if (e.target === tabInput || e.target === chk) return;
+        setCombo(idx, !chk.checked);
+        actualizar();
+      });
+      chk.addEventListener("change", () => {
+        card.classList.toggle("selected", chk.checked);
+        actualizar();
+      });
+    });
+    const btnTodos = modal.querySelector("#sel-todos");
+    const btnNinguno = modal.querySelector("#sel-ninguno");
+    const btnInvertir = modal.querySelector("#sel-invertir");
+    if (btnTodos) btnTodos.addEventListener("click", () => { combos.forEach((_, i) => setCombo(i, true)); actualizar(); });
+    if (btnNinguno) btnNinguno.addEventListener("click", () => { combos.forEach((_, i) => setCombo(i, false)); actualizar(); });
+    if (btnInvertir) btnInvertir.addEventListener("click", () => {
+      combos.forEach((_, i) => {
+        const chk = modal.querySelector(`.combo-sel[data-idx="${i}"]`);
+        setCombo(i, !chk.checked);
+      });
+      actualizar();
+    });
+
+    function actualizar() {
       const planes = construirPlanesImport();
       const total = planes.reduce((a, p) => a + p.rows.length, 0);
       summary.textContent = planes.length
         ? `${total} alumno(s) en ${planes.length} tab(s)`
-        : "Nada seleccionado";
+        : "Seleccioná al menos un grupo";
       btnOk.disabled = !planes.length;
+      renderPreview();
     }
-    modal.addEventListener("input", actualizarResumen);
-    modal.addEventListener("change", actualizarResumen);
+
+    function renderPreview() {
+      const body = modal.querySelector("#preview-body");
+      const cnt = modal.querySelector("#preview-count");
+      if (!body) return;
+      // Armar el set de combos seleccionados.
+      let filasVisibles = filasParseadas;
+      if (tieneGrupos) {
+        const sel = new Set();
+        modal.querySelectorAll(".combo-sel").forEach(chk => {
+          if (chk.checked) sel.add(Number(chk.dataset.idx));
+        });
+        const rowsDeCombos = new Set();
+        sel.forEach(i => combos[i].rows.forEach(r => rowsDeCombos.add(r)));
+        filasVisibles = filasParseadas.filter(f => rowsDeCombos.has(f));
+      }
+      const soloAct = soloActivos();
+      if (soloAct) filasVisibles = filasVisibles.filter(f => f.activo);
+
+      const mostradas = filasVisibles.slice(0, 200);
+      body.innerHTML = mostradas.length ? mostradas.map(f => {
+        const estadoLbl = !f.activo
+          ? '<span class="badge badge-closed">con pase</span>'
+          : codigosClaseActual.has(f.codigo)
+            ? '<span class="badge badge-done">ya en clase</span>'
+            : '<span class="badge badge-pending">nuevo</span>';
+        const cg = (f.curso || f.grupo) ? `${U.escapeHtml(f.curso || "—")}°${U.escapeHtml(f.grupo || "—")}` : '<span class="muted">—</span>';
+        return `
+          <div class="roster-preview-row">
+            <div>${U.escapeHtml(f.nombre)}</div>
+            <div><code>${U.escapeHtml(f.codigo)}</code></div>
+            <div>${cg}</div>
+            <div>${estadoLbl}</div>
+          </div>`;
+      }).join("") : `<div class="muted" style="padding:20px;text-align:center">Nada para mostrar con los filtros actuales.</div>`;
+      if (cnt) {
+        cnt.textContent = filasVisibles.length > 200
+          ? `mostrando 200 de ${filasVisibles.length}`
+          : `${filasVisibles.length} alumno(s)`;
+      }
+    }
+    modal.addEventListener("input", actualizar);
+    modal.addEventListener("change", actualizar);
 
     function construirPlanesImport() {
       const planes = [];
@@ -678,7 +765,7 @@
       return planes;
     }
 
-    actualizarResumen();
+    actualizar();
 
     btnOk.addEventListener("click", async () => {
       const modo = modal.querySelector("#modo-reemplazar").checked ? "reemplazar" : "merge";
