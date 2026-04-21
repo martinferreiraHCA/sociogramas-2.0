@@ -187,6 +187,7 @@
               <option value="">— Cambiar clase —</option>
               ${clases.map(c => `<option value="${U.escapeHtml(c)}" ${c===claseSel?"selected":""}>${U.escapeHtml(c)}</option>`).join("")}
             </select>` : ""}
+          <button class="btn btn-gray btn-sm" id="btn-guia" title="¿Qué significa cada métrica?">📖 Guía</button>
           <button class="btn btn-gray btn-sm" id="btn-diag" title="Verificar la password contra el Apps Script">🔐 Diagnóstico</button>
           <button class="btn btn-gray btn-sm" id="btn-refrescar">Actualizar</button>
           <button class="btn btn-gray btn-sm" id="btn-logout">Salir</button>
@@ -217,6 +218,7 @@
       await init();
     });
     h.querySelector("#btn-diag").addEventListener("click", ejecutarDiagnosticoAuth);
+    h.querySelector("#btn-guia").addEventListener("click", abrirGuiaMetricas);
     return h;
   }
 
@@ -1010,12 +1012,154 @@
     }
   }
 
+  // Pequeño ícono ℹ︎ con tooltip nativo. Devuelve un string HTML para inyectar
+  // dentro de encabezados, títulos, etc.
+  function ayuda(text) {
+    return `<span class="help-ico" tabindex="0" title="${U.escapeHtml(text)}">ℹ︎</span>`;
+  }
+
+  // ---------- Guía de métricas ----------
+  function abrirGuiaMetricas() {
+    const overlay = el("div", { class: "modal-overlay" });
+    const modal = el("div", { class: "modal-card", style: "max-width:920px" });
+    modal.innerHTML = `
+      <div class="modal-head">
+        <h3>📖 Guía — Cómo leer el dashboard</h3>
+        <button class="modal-close" id="g-cerrar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="guia-tabs">
+          <button class="guia-tab active" data-tab="colores">🎨 Colores</button>
+          <button class="guia-tab" data-tab="socio">🧭 Sociograma</button>
+          <button class="guia-tab" data-tab="detalle">👤 Detalle por alumno</button>
+          <button class="guia-tab" data-tab="grupos">🧩 Análisis de grupos</button>
+          <button class="guia-tab" data-tab="estrategias">🎯 Estrategias y prioridades</button>
+          <button class="guia-tab" data-tab="flujo">📥 Flujo completo</button>
+        </div>
+
+        <div class="guia-pane active" data-pane="colores">
+          <p class="muted">La encuesta tiene una pregunta de afinidad en la que el alumno evalúa a cada compañero con un color. Esas evaluaciones alimentan todo el resto.</p>
+          <div class="guia-grid">
+            <div class="guia-row"><span class="opcion-verde">Verde</span><div><b>Me gusta trabajar con esta persona.</b> Vale +3 para el grupo y habilita bonus de +2 si es recíproco (los dos se marcaron verde).</div></div>
+            <div class="guia-row"><span class="opcion-amarillo">Amarillo</span><div><b>A veces sí, a veces no.</b> Vale +1. No suma ni resta fuerte, pero indica relación ambivalente.</div></div>
+            <div class="guia-row"><span class="opcion-rojo">Rojo</span><div><b>Me resulta muy difícil trabajar con esta persona.</b> Vale -5. Si ambos se marcaron rojo, -5 extra. Por default el algoritmo evita juntar rojos mutuos.</div></div>
+            <div class="guia-row"><span class="opcion-blanco">Blanco</span><div><b>No tengo experiencia con esta persona.</b> Vale 0. Normal entre alumnos que no se conocen bien; tener muchos blancos hacia el mismo alumno sugiere aislamiento.</div></div>
+          </div>
+          <p class="muted mt-16">Además hay preguntas extra: referente (quién te parece líder), apoyo (quién necesita más ayuda), aislado (quién queda afuera), etc. Esas respuestas también entran al algoritmo de armado.</p>
+        </div>
+
+        <div class="guia-pane" data-pane="socio">
+          <p>Cada bolita es un alumno de la clase.</p>
+          <ul class="guia-list">
+            <li><b>Tamaño</b>: proporcional a la cantidad de 🟢 recibidos. El número adentro es ese contador.</li>
+            <li><b>Color del nodo</b>: verde con gradiente si ya respondió la encuesta, gris si todavía no.</li>
+            <li><b>Flechas</b>: van del <i>evaluador</i> al <i>evaluado</i>. Si los dos se evaluaron, verás dos flechas paralelas (recíprocas).</li>
+            <li><b>Hover</b>: el panel de la derecha se actualiza con lo que ese alumno <i>recibió</i> y lo que <i>dio</i>. Aparecen nombres hasta 6 por color.</li>
+            <li><b>Click</b>: fija ese alumno (su halo se vuelve azul). Click en el fondo lo suelta.</li>
+            <li><b>Filtros de colores</b>: arriba del sociograma podés ocultar flechas por color, mostrar sólo recíprocas o sólo las del alumno seleccionado.</li>
+            <li><b>Arrow highlight</b>: cuando hay alumno seleccionado, las flechas entrantes se ponen gruesas; las salientes se dibujan punteadas.</li>
+          </ul>
+        </div>
+
+        <div class="guia-pane" data-pane="detalle">
+          <p>La grilla "Respuestas por estudiante" tiene una tarjeta por alumno.</p>
+          <ul class="guia-list">
+            <li><b>Score verde</b> (chip grande): cantidad de 🟢 que recibió. Más alto = más popular para trabajar.</li>
+            <li><b>Barras de colores</b>: distribución de las respuestas recibidas (🟢 / 🟡 / 🔴 / ⚪). Un alumno con mucho rojo o blanco va a aparecer visualmente "cargado" en esos colores.</li>
+            <li><b>Estado</b>: "✓ completó" si ya respondió la encuesta, "pendiente" si no.</li>
+            <li><b>Click en la tarjeta</b>: abre el detalle completo. Ahí vas a encontrar dos pestañas:
+              <ul>
+                <li><b>Lo que recibió</b>: por pregunta, quién evaluó a este alumno y con qué color/opción.</li>
+                <li><b>Lo que dio</b>: por pregunta, a quién y con qué color evaluó el alumno.</li>
+              </ul>
+            </li>
+            <li>La pregunta 1 se agrupa por compañero con todos sus colores; el resto (líder, apoyo, etc.) aparece como chips con el nombre.</li>
+          </ul>
+        </div>
+
+        <div class="guia-pane" data-pane="grupos">
+          <p>Cuando el algoritmo arma grupos o vos los editás a mano, cada card muestra estos indicadores:</p>
+          <ul class="guia-list">
+            <li><b>Score de cohesión</b>: suma de los pesos de todas las relaciones internas del grupo. Un grupo con muchos verdes mutuos tendrá score alto; con rojos, score bajo o negativo. Sirve para comparar dentro de una misma clase, no es absoluto.</li>
+            <li><b>Relaciones internas (barra apilada)</b>: por cada par del grupo se clasifica:
+              <ul>
+                <li>🟢↔ <b>Verde mutuo</b>: los dos se evaluaron positivamente. Es el oro del grupo.</li>
+                <li>🟢→ <b>Verde unilateral</b>: uno marcó verde, el otro no llegó a rojo.</li>
+                <li>🟡 <b>Amarillo</b>: al menos un amarillo, sin verde ni rojo. Relación ambivalente.</li>
+                <li>🔴 <b>Rojo</b>: al menos uno marcó rojo. Bandera roja.</li>
+                <li>⚪ <b>Sin evaluar</b>: no se conocen / no se evaluaron. No es malo, pero si abundan indica baja integración.</li>
+              </ul>
+            </li>
+            <li><b>Fit por miembro</b> (color del chip): qué tanto aporta el alumno al grupo. Se calcula como el promedio del score de sus vínculos con el resto.
+              <ul>
+                <li>🟢 <b>fit &gt; 0.5</b>: sostiene al grupo.</li>
+                <li>⚪ <b>fit entre -0.5 y 0.5</b>: neutro.</li>
+                <li>🔴 <b>fit &lt; -0.5</b>: le costaría estar ahí, probablemente mejore moverlo.</li>
+              </ul>
+            </li>
+            <li><b>👑 Referente</b>: el alumno del grupo que más veces fue nominado como referente (pregunta 7). Desempata por popularidad.</li>
+            <li><b>Estado del grupo</b>: ✅ compatible · ⚠️ con advertencias (por ejemplo: sin referente, concentra a alumnos que necesitan apoyo) · ❌ con incompatibilidades (rojos mutuos adentro).</li>
+            <li><b>Rojos mutuos internos</b>: pares dentro del grupo en los que ambos se marcaron rojo. El algoritmo los evita, pero si editás a mano pueden aparecer.</li>
+          </ul>
+        </div>
+
+        <div class="guia-pane" data-pane="estrategias">
+          <p>La función objetivo combina <b>estrategia</b> (cómo arranca a armar) y <b>prioridad</b> (qué premia al decidir).</p>
+          <h5 class="guia-h5">Estrategia</h5>
+          <ul class="guia-list">
+            <li><b>Automático</b>: semillas = alumnos más vulnerables. Luego inserta por intensidad de opiniones. Robusto, default.</li>
+            <li><b>Balanceado</b>: alterna líderes con vulnerables como semillas. Busca mezcla de perfiles por grupo.</li>
+            <li><b>Homogéneo</b>: semillas por cuartiles de popularidad; cada grupo arranca con un punto representativo de un tramo. Favorece grupos con niveles similares.</li>
+            <li><b>Inclusión</b>: semillas = aislados/rechazados, para que queden en grupos distintos y rodeados de apoyo.</li>
+            <li><b>Liderazgo</b>: semillas = referentes. Garantiza un líder claro en cada grupo.</li>
+          </ul>
+          <h5 class="guia-h5">Prioridad</h5>
+          <ul class="guia-list">
+            <li><b>Evitar conflictos</b>: penaliza cualquier arista negativa. Suave para el grupo pero puede dejar a algunos aislados.</li>
+            <li><b>Maximizar colaboración</b>: premia verdes mutuos. Grupos con buena química interna, pero puede concentrar a los populares.</li>
+            <li><b>Desarrollar liderazgo</b>: premio extra si el grupo tiene un referente. Útil cuando la tarea exige coordinación.</li>
+            <li><b>Integrar aislados</b>: premia poner un aislado con populares; desalienta juntar varios vulnerables en el mismo grupo.</li>
+          </ul>
+          <p class="muted mt-16"><b>Explorar alternativas</b> corre seis combinaciones y las pone lado a lado para que compares y elijas.</p>
+        </div>
+
+        <div class="guia-pane" data-pane="flujo">
+          <ol class="guia-list">
+            <li><b>Paso 1 · Alumnos y códigos</b>: importás el CSV del colegio (el sistema usa las cédulas como código) o creás la clase a mano. Podés mezclar: importar y luego agregar / eliminar alumnos.</li>
+            <li><b>Paso 2 · Respuestas</b>: los alumnos entran al cuestionario con su código; cada respuesta se guarda en la planilla. El stepper arriba te muestra cuántos completaron.</li>
+            <li><b>Sociograma</b>: cuando hay respuestas, es la vista rápida de quién se lleva con quién. Lo usás para detectar bolitas aisladas, tríadas fuertes, polarización por rojos.</li>
+            <li><b>Respuestas por estudiante</b>: tarjetas compactas con el resumen de cada alumno. Click para abrir el detalle completo.</li>
+            <li><b>Paso 3 · Armado de grupos</b>: elegís estrategia + prioridad + tamaño y el algoritmo genera una propuesta. Podés: editar arrastrando, regenerar, explorar alternativas, o guardarlo en la planilla. El borrador se auto-guarda en tu navegador por si cerrás sin guardar.</li>
+          </ol>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <div class="muted">Podés reabrir esta guía cuando quieras con el botón <b>📖 Guía</b> del header.</div>
+        <button class="btn btn-gray" id="g-cerrar2">Cerrar</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const cerrar = () => overlay.remove();
+    modal.querySelector("#g-cerrar").addEventListener("click", cerrar);
+    modal.querySelector("#g-cerrar2").addEventListener("click", cerrar);
+    overlay.addEventListener("click", (ev) => { if (ev.target === overlay) cerrar(); });
+    modal.querySelectorAll(".guia-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        modal.querySelectorAll(".guia-tab").forEach(b => b.classList.remove("active"));
+        modal.querySelectorAll(".guia-pane").forEach(p => p.classList.remove("active"));
+        btn.classList.add("active");
+        modal.querySelector(`.guia-pane[data-pane="${btn.dataset.tab}"]`).classList.add("active");
+      });
+    });
+  }
+
   // ---------- Sociograma ----------
   function renderSociograma(ests, resp) {
     const c = el("div", { class: "panel-container" });
     c.innerHTML = `
       <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
-        <h3>Sociograma</h3>
+        <h3>Sociograma ${ayuda("Cada bolita es un alumno. Tamaño = 🟢 recibidos. Las flechas van del evaluador al evaluado. Click fija la selección y el panel de la derecha muestra el detalle.")} <a href="javascript:void(0)" class="guia-link" onclick="document.getElementById('btn-guia').click()">📖</a></h3>
         <div class="sociograma-filters">
           <label class="chip chip-filter"><input type="checkbox" class="f-color" data-c="verde" checked> 🟢 Verde</label>
           <label class="chip chip-filter"><input type="checkbox" class="f-color" data-c="amarillo" checked> 🟡 Amarillo</label>
@@ -1521,7 +1665,7 @@
     const c = el("div", { class: "panel-container" });
     c.innerHTML = `
       <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <h3>3 · Armado de grupos ${draftActivo ? '<span class="badge badge-pending" title="Hay cambios en local que todavía no están en la planilla">📝 borrador no guardado</span>' : ''}</h3>
+        <h3>3 · Armado de grupos ${ayuda("Algoritmo en 4 fases: (1) calcula afinidades y bonificaciones por reciprocidad, (2) elige semillas según la estrategia, (3) inserta el resto greedy por score, (4) aplica swaps tipo Kernighan-Lin. Abrí la guía para el detalle.")} <a href="javascript:void(0)" class="guia-link" onclick="document.getElementById('btn-guia').click()">📖</a> ${draftActivo ? '<span class="badge badge-pending" title="Hay cambios en local que todavía no están en la planilla">📝 borrador no guardado</span>' : ''}</h3>
         <div class="flex-row" style="gap:8px;flex-wrap:wrap">
           <button class="btn btn-gray btn-sm" id="btn-add-grupo">+ Grupo</button>
           <button class="btn btn-orange btn-sm" id="btn-reset">Reiniciar</button>
@@ -1532,13 +1676,13 @@
       <div class="grupos-config mt-16">
         <div class="grupos-config-row">
           <label>
-            <span>👥 Tamaño de grupo</span>
+            <span>👥 Tamaño de grupo ${ayuda("Tamaño preferido. El algoritmo puede desviarse ±1 para evitar un grupo con restos.")}</span>
             <select id="tam-grupo" class="cuestionario-select">
               ${[3,4,5,6].map(n => `<option value="${n}" ${gruposConfig.tamGrupo===n?"selected":""}>${n} estudiantes</option>`).join("")}
             </select>
           </label>
           <label>
-            <span>🎯 Estrategia</span>
+            <span>🎯 Estrategia ${ayuda("Cómo se eligen las semillas (el primer miembro de cada grupo) y el orden de inserción del resto. Mirá la guía para ver qué hace cada una.")}</span>
             <select id="estrategia" class="cuestionario-select">
               ${[
                 ["automatico","Automático (evita rojos)"],
@@ -1550,7 +1694,7 @@
             </select>
           </label>
           <label>
-            <span>⚖️ Prioridad</span>
+            <span>⚖️ Prioridad ${ayuda("Qué premia la función objetivo al decidir la composición: minimizar conflictos, maximizar colaboración, garantizar un referente, o integrar aislados.")}</span>
             <select id="prioridad" class="cuestionario-select">
               ${[
                 ["evitar_conflictos","Evitar conflictos"],
@@ -1562,7 +1706,7 @@
           </label>
           <label class="grupos-config-check">
             <input id="permitir-rojo" type="checkbox" ${gruposConfig.permitirRojoMutuo?"checked":""} />
-            <span>Permitir rojos mutuos</span>
+            <span>Permitir rojos mutuos ${ayuda("Por default el algoritmo veta juntar dos alumnos que se marcaron rojo entre sí. Marcá esto si preferís priorizar otras restricciones.")}</span>
           </label>
         </div>
         <div class="grupos-config-actions">
@@ -1624,23 +1768,23 @@
       const resumen = c.querySelector("#algo-resumen");
       resumen.innerHTML = `
         <div class="grupos-algo-resumen">
-          <div class="grupos-algo-tile grupos-algo-ok">
+          <div class="grupos-algo-tile grupos-algo-ok" title="Grupos cuyo análisis no devolvió warnings (sin rojos internos, con referente, sin concentración de vulnerables).">
             <div class="num">${okGrupos}</div>
             <div class="lbl">grupos sin advertencias</div>
           </div>
-          <div class="grupos-algo-tile grupos-algo-warn">
+          <div class="grupos-algo-tile grupos-algo-warn" title="Grupos con al menos una advertencia: sin referente claro, concentración de alumnos que necesitan apoyo, o algún rojo unilateral.">
             <div class="num">${warnGrupos}</div>
             <div class="lbl">con advertencias</div>
           </div>
-          <div class="grupos-algo-tile grupos-algo-err">
+          <div class="grupos-algo-tile grupos-algo-err" title="Pares dentro de un mismo grupo en los que ambos se marcaron rojo. Idealmente debe ser 0.">
             <div class="num">${res.rojosMutuosInternos}</div>
             <div class="lbl">rojos mutuos internos</div>
           </div>
-          <div class="grupos-algo-tile">
+          <div class="grupos-algo-tile" title="Suma de los pesos de todas las relaciones internas de todos los grupos. Sirve para comparar composiciones entre sí, no como valor absoluto.">
             <div class="num">${res.scoreTotal.toFixed(1)}</div>
             <div class="lbl">score total de cohesión</div>
           </div>
-          <div class="grupos-algo-tile">
+          <div class="grupos-algo-tile" title="Cantidad de integrantes por grupo. El algoritmo intenta respetar el tamaño elegido ±1.">
             <div class="num">${res.tamanos.join("·")}</div>
             <div class="lbl">tamaños</div>
           </div>
@@ -1929,18 +2073,18 @@
     }
 
     host.innerHTML = `
-      <h4 class="grupos-stats-title">📊 Compatibilidad del curso (por pares)</h4>
+      <h4 class="grupos-stats-title">📊 Compatibilidad del curso (por pares) ${ayuda("Se analiza cada par de alumnos de la clase y se clasifica según la peor evaluación en la pregunta de afinidad.")}</h4>
       <div class="grupos-stats-grid">
-        <div class="grupos-stat grupos-stat-ok">
+        <div class="grupos-stat grupos-stat-ok" title="Pares donde al menos uno marcó 🟢 y ninguno marcó 🔴.">
           <div class="num">${comp}</div><div class="lbl">Compatibles</div>
         </div>
-        <div class="grupos-stat grupos-stat-warn">
+        <div class="grupos-stat grupos-stat-warn" title="Pares con 🟡 sin ningún 🟢 ni 🔴. Relación ambivalente.">
           <div class="num">${neu}</div><div class="lbl">Neutras</div>
         </div>
-        <div class="grupos-stat grupos-stat-err">
+        <div class="grupos-stat grupos-stat-err" title="Pares donde al menos uno marcó 🔴. Son las que el algoritmo trata de evitar dentro de un mismo grupo.">
           <div class="num">${prob}</div><div class="lbl">Incompatibilidades</div>
         </div>
-        <div class="grupos-stat grupos-stat-unknown">
+        <div class="grupos-stat grupos-stat-unknown" title="Pares en los que ninguno evaluó al otro o sólo marcaron ⚪. Muchas ⚪ sugieren alumnos que no se conocen bien.">
           <div class="num">${desc}</div><div class="lbl">Sin experiencia</div>
         </div>
       </div>`;
