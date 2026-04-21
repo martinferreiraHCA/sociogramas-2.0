@@ -684,32 +684,144 @@
       const modo = modal.querySelector("#modo-reemplazar").checked ? "reemplazar" : "merge";
       const planes = construirPlanesImport();
       if (!planes.length) return;
-      cerrar();
-      U.toast(`Importando ${planes.length} tab(s)…`, "info");
-      try {
-        const resultados = [];
-        for (const plan of planes) {
-          const r = await API.importarEstudiantes(pw, plan.tab, plan.rows, modo);
-          resultados.push({ tab: plan.tab, r });
-          if (!r || !r.ok) console.error(`importar_estudiantes "${plan.tab}" falló:`, r);
-        }
-        const sumar = (key) => resultados.reduce((a, x) => a + (x.r && x.r[key] ? x.r[key] : 0), 0);
-        const partes = [];
-        const ag = sumar("agregados"), ac = sumar("actualizados"),
-              co = sumar("conflictos_total"), inv = sumar("invalidos");
-        if (ag) partes.push(`${ag} nuevos`);
-        if (ac) partes.push(`${ac} actualizados`);
-        if (co) partes.push(`${co} con conflicto`);
-        if (inv) partes.push(`${inv} inválidos`);
-        const fallos = resultados.filter(x => !x.r || !x.r.ok).length;
-        if (fallos) U.toast(`${fallos} tab(s) con error · mirá la consola`, "error");
-        else U.toast("Import OK · " + (partes.join(" · ") || "sin cambios"), "success");
-        await refrescar();
-      } catch (err) {
-        console.error("importar_estudiantes error de red:", err);
-        U.toast("Error de conexión: " + (err.message || err), "error");
-      }
+      const totalAlumnos = planes.reduce((a, p) => a + p.rows.length, 0);
+      await ejecutarImportacionConProgreso(modal, planes, modo, totalAlumnos);
     });
+  }
+
+  // Traduce errores del backend a mensajes amigables.
+  const ERRORES_HUMANOS = {
+    forbidden: "Contraseña rechazada por el Apps Script. ¿La admin password del Code.gs coincide con la que usaste al entrar?",
+    accion_desconocida: "El Apps Script todavía corre el código viejo. Hay que redeployar una Versión nueva desde 'Administrar implementaciones'.",
+    nombre_reservado: "El nombre del tab no puede ser 'respuestas', 'completados' ni 'grupos'.",
+    clase_existe: "Ya existe un tab con ese nombre en la planilla.",
+    clase_no_existe: "No existe el tab en la planilla.",
+    clase_vacia: "El nombre del tab está vacío.",
+    datos_incompletos: "Faltan datos requeridos (nombre o código).",
+    empty_body: "El Apps Script no recibió datos (posible corte de red).",
+    invalid_json: "El cuerpo enviado no era JSON válido.",
+    lock_timeout: "El Apps Script está procesando otra operación. Probá de nuevo en unos segundos.",
+    server_error: "El Apps Script tiró una excepción (mirá el log del script).",
+    respuesta_no_json: "El Apps Script devolvió HTML en vez de JSON — suele ser señal de que la URL del deploy es inválida.",
+  };
+  function explicarError(r, errNet) {
+    if (errNet) return `Red: ${errNet.message || errNet}`;
+    if (!r) return "Sin respuesta del servidor.";
+    const base = r.error ? (ERRORES_HUMANOS[r.error] || r.error) : "Error desconocido";
+    const extra = r.detail ? ` · detalle: ${String(r.detail).slice(0, 160)}` : "";
+    return base + extra;
+  }
+
+  // Reemplaza el cuerpo del modal por un stream de pasos (una fila por
+  // operación). Cada paso inicia con spinner, al terminar pasa a ✔ o ✖.
+  async function ejecutarImportacionConProgreso(modal, planes, modo, totalAlumnos) {
+    modal.querySelector(".modal-head h3").textContent = "Importando…";
+    const closeBtn = modal.querySelector("#modal-cerrar");
+    if (closeBtn) closeBtn.disabled = true;
+    modal.querySelector(".modal-body").innerHTML = `
+      <div class="muted mb-12">Modo: <b>${modo === "reemplazar" ? "reemplazar roster" : "agregar / actualizar"}</b> · ${planes.length} tab(s) · ${totalAlumnos} alumno(s)</div>
+      <div class="import-progress" id="progress-list"></div>
+    `;
+    modal.querySelector(".modal-foot").innerHTML = `
+      <div class="muted" id="progress-summary">Procesando…</div>
+      <button class="btn btn-gray" id="progress-close" disabled>Cerrar</button>
+    `;
+    const pl = modal.querySelector("#progress-list");
+    const summary = modal.querySelector("#progress-summary");
+    const btnClose = modal.querySelector("#progress-close");
+    btnClose.addEventListener("click", () => modal.closest(".modal-overlay").remove());
+
+    function nuevoPaso(titulo, sub) {
+      const row = document.createElement("div");
+      row.className = "progress-row running";
+      row.innerHTML = `
+        <div class="progress-icon"><span class="spinner-sm"></span></div>
+        <div class="progress-body">
+          <div class="progress-title"></div>
+          <div class="progress-detail"></div>
+        </div>
+      `;
+      row.querySelector(".progress-title").textContent = titulo;
+      if (sub) row.querySelector(".progress-detail").textContent = sub;
+      pl.appendChild(row);
+      pl.scrollTop = pl.scrollHeight;
+      return {
+        ok: (detail) => {
+          row.classList.remove("running"); row.classList.add("done");
+          row.querySelector(".progress-icon").innerHTML = "✅";
+          if (detail) row.querySelector(".progress-detail").textContent = detail;
+        },
+        err: (detail) => {
+          row.classList.remove("running"); row.classList.add("error");
+          row.querySelector(".progress-icon").innerHTML = "❌";
+          if (detail) row.querySelector(".progress-detail").textContent = detail;
+        },
+        info: (detail) => {
+          if (detail) row.querySelector(".progress-detail").textContent = detail;
+        },
+      };
+    }
+
+    const resultados = [];
+    // Paso 0: preparación
+    const s0 = nuevoPaso(`Preparando ${planes.length} tab(s) a procesar`, `Total ${totalAlumnos} alumno(s) · modo ${modo}`);
+    s0.ok();
+
+    for (const plan of planes) {
+      const s = nuevoPaso(`Importando "${plan.tab}"`, `${plan.rows.length} alumno(s) → planilla`);
+      try {
+        const r = await API.importarEstudiantes(pw, plan.tab, plan.rows, modo);
+        resultados.push({ tab: plan.tab, r });
+        if (!r || !r.ok) {
+          s.err(explicarError(r));
+          console.error(`importar_estudiantes "${plan.tab}" falló:`, r);
+        } else {
+          const partes = [];
+          if (r.agregados) partes.push(`${r.agregados} nuevos`);
+          if (r.actualizados) partes.push(`${r.actualizados} actualizados`);
+          if (r.conflictos_total) partes.push(`${r.conflictos_total} con conflicto`);
+          if (r.invalidos) partes.push(`${r.invalidos} inválidos`);
+          s.ok(partes.join(" · ") || "sin cambios en esta clase");
+        }
+      } catch (err) {
+        resultados.push({ tab: plan.tab, r: null, errNet: err });
+        s.err(explicarError(null, err));
+        console.error(`importar_estudiantes "${plan.tab}" error de red:`, err);
+      }
+    }
+
+    // Paso final: refrescar
+    const sR = nuevoPaso("Releyendo la planilla", "descargando roster actualizado");
+    try {
+      await refrescar();
+      sR.ok("listo");
+    } catch (err) {
+      sR.err(explicarError(null, err));
+      console.error("refrescar falló:", err);
+    }
+
+    // Resumen
+    const sum = (key) => resultados.reduce((a, x) => a + (x.r && x.r[key] ? x.r[key] : 0), 0);
+    const ag = sum("agregados"), ac = sum("actualizados"),
+          co = sum("conflictos_total"), inv = sum("invalidos");
+    const fallos = resultados.filter(x => !x.r || !x.r.ok).length;
+    const partes = [];
+    if (ag) partes.push(`${ag} nuevos`);
+    if (ac) partes.push(`${ac} actualizados`);
+    if (co) partes.push(`${co} conflictos`);
+    if (inv) partes.push(`${inv} inválidos`);
+    const resumenTxt = partes.join(" · ") || "sin cambios";
+    if (fallos) {
+      summary.innerHTML = `<span class="text-error">❌ ${fallos} tab(s) con error</span> · ${resumenTxt}`;
+      modal.querySelector(".modal-head h3").textContent = "Importación incompleta";
+      U.toast(`Import con ${fallos} error(es) · mirá el detalle`, "error");
+    } else {
+      summary.innerHTML = `✅ ${resumenTxt}`;
+      modal.querySelector(".modal-head h3").textContent = "Importación completada";
+      U.toast("Import OK · " + resumenTxt, "success");
+    }
+    btnClose.disabled = false;
+    if (closeBtn) closeBtn.disabled = false;
   }
 
   async function eliminarAlumno(est) {

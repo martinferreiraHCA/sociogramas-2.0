@@ -636,3 +636,57 @@ table.data-table tbody tr:hover { background: #fafafa; }
   .roster-tr { grid-template-columns: 1fr 1fr; }
   .roster-tr > div:nth-child(4) { grid-column: 1 / -1; justify-content: flex-start; }
 }
+
+/* ---------- Import progress ---------- */
+.import-progress {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 360px; overflow-y: auto;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px; background: #fafafa;
+  padding: 8px;
+}
+.progress-row {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid transparent;
+  transition: background 0.2s, border-color 0.2s;
+}
+.progress-row.running {
+  background: #f5faff; border-color: #bbdefb;
+}
+.progress-row.done {
+  background: #f3fbf4; border-color: #c8e6c9;
+}
+.progress-row.error {
+  background: #fdeeee; border-color: #ffcdd2;
+}
+.progress-icon {
+  font-size: 1em;
+  display: flex; align-items: center; justify-content: center;
+  padding-top: 2px;
+}
+.progress-title { font-weight: 500; color: #333; font-size: 0.95em; }
+.progress-detail {
+  color: #555;
+  font-size: 0.82em;
+  margin-top: 2px;
+  word-break: break-word;
+}
+.progress-row.error .progress-detail { color: #b71c1c; font-weight: 500; }
+.text-error { color: #c62828; font-weight: 600; }
+
+/* Spinner chico */
+.spinner-sm {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid #bbdefb;
+  border-top-color: #1976d2;
+  border-radius: 50%;
+  animation: spin-sm 0.7s linear infinite;
+}
+@keyframes spin-sm { to { transform: rotate(360deg); } }
