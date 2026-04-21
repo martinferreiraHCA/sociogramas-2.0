@@ -218,10 +218,30 @@
 
   function renderSelectorClase() {
     const c = el("div", { class: "panel-container" });
-    c.appendChild(el("h3", null, "Seleccioná una clase"));
     if (!clases.length) {
-      c.appendChild(el("p", { class: "muted mt-16" }, "No hay clases todavía. Creá una hoja por clase en la planilla, o usá el botón de abajo."));
+      // Primera visita: todo arranca importando el CSV.
+      c.innerHTML = `
+        <div class="empty-hero">
+          <div class="empty-hero-emoji">📥</div>
+          <h3>Empezá subiendo el CSV del colegio</h3>
+          <p class="muted">El sistema detecta cada curso y grupo (ej. <b>8°1</b>, <b>8°2</b>), crea un tab por cada uno en la planilla y usa las cédulas como código. No hace falta crear clases a mano.</p>
+          <div class="flex-row" style="justify-content:center;gap:10px;margin-top:18px;flex-wrap:wrap">
+            <button class="btn btn-green" id="btn-landing-importar">📥 Subir CSV del colegio</button>
+            <button class="btn btn-gray" id="btn-landing-manual">o crear una clase vacía a mano</button>
+          </div>
+          <input type="file" id="file-landing" accept=".csv,text/csv" style="display:none" />
+        </div>`;
     } else {
+      // Hay clases: mostrar listado + opción de subir otro CSV.
+      c.innerHTML = `
+        <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <h3>Seleccioná una clase</h3>
+          <div class="flex-row" style="gap:8px;flex-wrap:wrap">
+            <button class="btn btn-green btn-sm" id="btn-landing-importar">📥 Importar otro CSV</button>
+            <button class="btn btn-gray btn-sm" id="btn-landing-manual">+ Nueva clase vacía</button>
+            <input type="file" id="file-landing" accept=".csv,text/csv" style="display:none" />
+          </div>
+        </div>`;
       const list = el("div", { class: "list-card mt-16" });
       clases.forEach(cl => {
         const count = estudiantes.filter(e => e.clase === cl).length;
@@ -237,9 +257,34 @@
       c.appendChild(list);
     }
 
-    const wrap = el("div", { class: "mt-16 flex-row", style: "gap:8px" });
-    wrap.appendChild(el("button", { class: "btn", onclick: nuevaClasePrompt }, "+ Nueva clase"));
-    c.appendChild(wrap);
+    // Wiring común (existe en ambos modos).
+    const fi = c.querySelector("#file-landing");
+    const btnImportar = c.querySelector("#btn-landing-importar");
+    const btnManual = c.querySelector("#btn-landing-manual");
+    if (btnImportar && fi) btnImportar.addEventListener("click", () => fi.click());
+    if (btnManual) btnManual.addEventListener("click", nuevaClasePrompt);
+    if (fi) fi.addEventListener("change", (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = U.parseRosterEscolar(String(reader.result || ""));
+          if (!parsed.rows.length) {
+            U.toast("No se encontraron estudiantes válidos (¿CSV sin columnas Documento/Nombre?)", "error");
+            console.warn("parseRosterEscolar:", parsed);
+            return;
+          }
+          abrirModalImportar(parsed.rows, []);
+        } catch (err) {
+          console.error("parseRosterEscolar error", err);
+          U.toast("No se pudo leer el CSV: " + err.message, "error");
+        }
+      };
+      reader.readAsText(f, "utf-8");
+    });
+
     return c;
   }
 
@@ -541,10 +586,11 @@
             }).join("")}
           </div>
         ` : `
-          <div class="flex-row" style="gap:8px;margin-bottom:12px">
-            <label style="color:#333;margin:0"><b>Tab destino:</b></label>
-            <input type="text" id="tab-destino-unico" value="${U.escapeHtml(claseSel || "")}" style="max-width:220px" />
+          <div class="flex-row" style="gap:8px;margin-bottom:12px;align-items:center">
+            <label style="color:#333;margin:0"><b>Nombre del tab destino:</b></label>
+            <input type="text" id="tab-destino-unico" value="${U.escapeHtml(claseSel || "")}" placeholder="ej. 8°1" style="max-width:220px" />
           </div>
+          <div class="muted mb-12">El CSV no trae columnas Curso/Grupo. Escribí a mano cómo se va a llamar el tab en la planilla.</div>
         `}
 
         <h4 style="margin:14px 0 8px">Vista previa (primeros 200)</h4>
