@@ -56,20 +56,32 @@
 
   async function init() {
     root.innerHTML = '<div class="panel-container"><p>Cargando…</p></div>';
-    const r = await API.login(codigo);
-    if (!r.ok) {
-      root.innerHTML = '<div class="panel-container"><p>Estudiante no encontrado. <a href="./index.html">Volver al inicio</a>.</p></div>';
+    let r;
+    try { r = await API.login(codigo); }
+    catch (err) {
+      console.error("login red:", err);
+      root.innerHTML = '<div class="panel-container"><p class="cuestionario-error">No se pudo conectar con el servidor. Revisá tu conexión y reintentá.</p></div>';
+      return;
+    }
+    if (!r || !r.ok) {
+      const detalle = r && r.error ? ` <small>(${U.escapeHtml(r.error)})</small>` : "";
+      root.innerHTML = `<div class="panel-container"><p>Estudiante no encontrado.${detalle} <a href="./index.html">Volver al inicio</a>.</p></div>`;
+      return;
+    }
+    if (!Array.isArray(r.preguntas) || !r.preguntas.length || !Array.isArray(r.opciones)) {
+      console.error("login: faltan datos del cuestionario", r);
+      root.innerHTML = '<div class="panel-container"><p class="cuestionario-error">No se pudo cargar la configuración del cuestionario. Avisale al docente.</p></div>';
       return;
     }
     estudiante = r.estudiante;
-    companeros = r.companeros;
+    companeros = Array.isArray(r.companeros) ? r.companeros : [];
     preguntas  = r.preguntas;
 
     preguntas.forEach(p => preguntaPorNumero[p.numero] = p);
     r.opciones.forEach(op => {
       (opcionesPorNumero[op.numero_pregunta] = opcionesPorNumero[op.numero_pregunta] || []).push(op);
     });
-    r.flujos.forEach(f => {
+    (r.flujos || []).forEach(f => {
       flujoPorPreguntaYOrden[`${f.numero_pregunta}|${f.opcion_orden}`] = f.siguiente_pregunta;
     });
 

@@ -66,7 +66,8 @@
       API.fetchCompletados(pw),
       API.fetchGrupos(pw),
     ]);
-    if (!ests || ests.ok === false || !resp || resp.ok === false) {
+    if (!ests || !ests.ok || !resp || !resp.ok) {
+      console.error("init: respuesta inválida de Apps Script", { ests, resp });
       sessionStorage.removeItem("admin_pw");
       window.location.href = "./admin-login.html";
       return;
@@ -880,8 +881,20 @@
     // Paso final: refrescar
     const sR = nuevoPaso("Releyendo la planilla", "descargando roster actualizado");
     try {
+      // Si la importación se disparó desde la landing (sin clase seleccionada)
+      // y al menos una clase se creó con éxito, posicionarse en la primera.
+      const primerPlanOk = planes.find((p, i) => {
+        const r = resultados[i] && resultados[i].r;
+        return r && r.ok;
+      });
+      if (!claseSel && primerPlanOk) {
+        claseSel = primerPlanOk.tab;
+        const url = new URL(window.location.href);
+        url.searchParams.set("clase", claseSel);
+        history.replaceState(null, "", url);
+      }
       await refrescar();
-      sR.ok("listo");
+      sR.ok(claseSel ? `abriendo "${claseSel}"` : "listo");
     } catch (err) {
       sR.err(explicarError(null, err));
       console.error("refrescar falló:", err);
