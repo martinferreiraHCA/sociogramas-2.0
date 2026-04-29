@@ -23,6 +23,95 @@
   if (!idToken) { logoutYRedirigir(); return; }
   if (adminExp && adminExp * 1000 < Date.now()) { logoutYRedirigir("sesion_expirada"); return; }
 
+  function decodeJwtClaims(token) {
+    try {
+      const parts = (token || "").split(".");
+      return JSON.parse(decodeURIComponent(escape(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))));
+    } catch { return null; }
+  }
+
+  // Pantalla de diagnóstico que reemplaza el redirect silencioso. Imprime
+  // la respuesta cruda del Apps Script + los claims del id_token para que
+  // se vea exactamente qué está fallando.
+  async function mostrarPantallaDiagnostico(ctx) {
+    const claims = decodeJwtClaims(idToken) || {};
+    const cfg = window.APP_CONFIG || {};
+    const url = cfg.APPS_SCRIPT_URL || "(no configurada)";
+    const checkUrl = url + "?action=admin_check&id_token=" + encodeURIComponent(idToken);
+    const dump = (o) => {
+      try { return JSON.stringify(o, null, 2); } catch { return String(o); }
+    };
+
+    let auth = null, ping = null;
+    try { ping = await fetch(url + "?action=ping").then(r => r.json()); } catch (e) { ping = { error: String(e) }; }
+    try { auth = await API.debugAuth(idToken); } catch (e) { auth = { error: String(e) }; }
+
+    root.innerHTML = "";
+    const c = el("div", { class: "panel-container" });
+    c.innerHTML = `
+      <h2 style="color:#c62828;margin:0 0 6px">⚠️ Sesión rechazada por el Apps Script</h2>
+      <p class="muted">El Apps Script respondió <code>${U.escapeHtml(ctx.errorPrincipal || "(sin error)")}</code> al cargar el dashboard. Acá está todo lo que necesitás para arreglarlo.</p>
+
+      <h3 style="margin-top:18px">1 · ¿Qué dice tu id_token?</h3>
+      <div class="diag-box">
+        <div><b>email:</b> ${U.escapeHtml(claims.email || "(no presente)")}</div>
+        <div><b>email_verified:</b> ${String(claims.email_verified)}</div>
+        <div><b>aud (Client ID que firmó el token):</b><br><code>${U.escapeHtml(claims.aud || "?")}</code></div>
+        <div><b>exp:</b> ${claims.exp ? new Date(claims.exp * 1000).toLocaleString() : "?"}</div>
+        <div><b>hd (dominio):</b> ${U.escapeHtml(claims.hd || claims.email_domain || "(no presente)")}</div>
+      </div>
+
+      <h3 style="margin-top:18px">2 · ¿Qué espera tu Apps Script?</h3>
+      <div class="diag-box">
+        <div><b>CONFIG.GOOGLE_CLIENT_ID</b> debería ser igual a <code>aud</code> de arriba.</div>
+        <div><b>CONFIG.ADMIN_DOMAIN</b> debería ser <code>${U.escapeHtml(cfg.ADMIN_DOMAIN || "hca.edu.uy")}</code>.</div>
+        <div class="mt-16"><b>Frontend usa Client ID:</b><br><code>${U.escapeHtml(cfg.GOOGLE_CLIENT_ID || "(no configurado)")}</code></div>
+      </div>
+
+      <h3 style="margin-top:18px">3 · ¿Qué responde Apps Script?</h3>
+      <details open class="diag-box">
+        <summary><b>ping</b> (público, debería responder ok)</summary>
+        <pre>${U.escapeHtml(dump(ping))}</pre>
+      </details>
+      <details open class="diag-box">
+        <summary><b>debug_auth</b> (verificación de tu id_token contra Code.gs)</summary>
+        <pre>${U.escapeHtml(dump(auth))}</pre>
+      </details>
+      <details class="diag-box">
+        <summary><b>fetchEstudiantes</b> (la llamada real que rebotó)</summary>
+        <pre>${U.escapeHtml(dump(ctx.ests))}</pre>
+      </details>
+
+      <h3 style="margin-top:18px">4 · Cómo arreglarlo</h3>
+      <ol class="muted" style="margin-left:20px">
+        <li>Si <code>aud</code> ≠ <code>CONFIG.GOOGLE_CLIENT_ID</code> → editá <code>Code.gs</code> con el Client ID de arriba, guardá y redeployá una <b>Versión nueva</b>.</li>
+        <li>Si la respuesta de <code>debug_auth</code> dice <code>domain_ok: false</code> → la cuenta no es del dominio configurado.</li>
+        <li>Si <code>tokeninfo_falló</code> → el token expiró; cerrá sesión y volvé a entrar.</li>
+        <li>Si todo lo demás está bien y igual rebota, el deploy del Apps Script tiene el código viejo: redeployá.</li>
+      </ol>
+
+      <div class="flex-row mt-16" style="gap:8px;justify-content:flex-end">
+        <a class="btn btn-gray" href="${U.escapeHtml(checkUrl)}" target="_blank" rel="noopener">Abrir admin_check en una pestaña</a>
+        <button class="btn btn-gray" id="d-copiar">📋 Copiar todo el diagnóstico</button>
+        <button class="btn" id="d-reintentar">Reintentar</button>
+        <button class="btn btn-orange" id="d-logout">Cerrar sesión y volver al login</button>
+      </div>`;
+    root.appendChild(c);
+
+    c.querySelector("#d-reintentar").addEventListener("click", () => location.reload());
+    c.querySelector("#d-logout").addEventListener("click", () => logoutYRedirigir());
+    c.querySelector("#d-copiar").addEventListener("click", () => {
+      const todo = {
+        error_principal: ctx.errorPrincipal,
+        id_token_claims: claims,
+        config_frontend: { GOOGLE_CLIENT_ID: cfg.GOOGLE_CLIENT_ID, ADMIN_DOMAIN: cfg.ADMIN_DOMAIN, APPS_SCRIPT_URL: url },
+        ping, debug_auth: auth,
+        fetch_estudiantes_response: ctx.ests,
+      };
+      navigator.clipboard.writeText(dump(todo)).then(() => U.toast("Copiado", "success"));
+    });
+  }
+
   // Datos cargados una vez al inicio.
   let estudiantes = [];      // [{codigo, nombre, clase}]
   let preguntas = [];        // [{numero, texto, tipo}]
@@ -84,7 +173,9 @@
     if (!ests || !ests.ok || !resp || !resp.ok) {
       console.error("init: respuesta inválida de Apps Script", { ests, resp });
       const e = (ests && ests.error) || (resp && resp.error);
-      logoutYRedirigir(e === "unauthorized" ? "sesion_invalida" : null);
+      // En vez de redirigir silenciosamente, mostramos una pantalla de
+      // diagnóstico con todo el contexto necesario para entender por qué.
+      mostrarPantallaDiagnostico({ ests, resp, errorPrincipal: e });
       return;
     }
     estudiantes = ests.data || [];
