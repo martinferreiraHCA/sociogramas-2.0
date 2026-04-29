@@ -1272,3 +1272,91 @@ table.data-table tbody tr:hover { background: #fafafa; }
 }
 .cuest-pend-row:last-child { border-bottom: none; }
 .cuest-pend-row span { color: #8d6e00; }
+
+/* ---------- Cards de afinidad (verde/amarillo/rojo/blanco) ---------- */
+.afi-cards {
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: 600px;
+  margin: 16px auto;
+}
+.afi-card {
+  text-align: left;
+  background: #fff;
+  border: 2px solid #ddd;
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  font-family: inherit;
+  width: 100%;
+}
+.afi-card:hover {
+  border-color: #888;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+.afi-head {
+  display: grid;
+  grid-template-columns: 36px auto 1fr 24px;
+  align-items: center;
+  gap: 10px;
+}
+.afi-icon { font-size: 1.6em; line-height: 1; }
+.afi-label {
+  font-weight: 700;
+  font-size: 1em;
+  letter-spacing: 0.04em;
+}
+.afi-short { color: #555; font-size: 0.9em; }
+.afi-check {
+  text-align: center;
+  font-weight: 700;
+  color: transparent;
+  border: 2px solid #ddd;
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  line-height: 18px;
+  font-size: 0.9em;
+  transition: all 0.18s ease;
+}
+.afi-desc {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #e5e5e5;
+  color: #444;
+  font-size: 0.9em;
+  line-height: 1.45;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease, border-color 0.25s ease;
+}
+.afi-card:hover .afi-desc,
+.afi-card.selected .afi-desc {
+  max-height: 320px;
+  opacity: 1;
+}
+.afi-card.selected .afi-check {
+  background: currentColor;
+  color: #fff;
+  border-color: currentColor;
+}
+
+/* Tinte por color */
+.afi-card-verde .afi-label    { color: #2e7d32; }
+.afi-card-verde:hover         { border-color: #66bb6a; background: #f3fbf4; }
+.afi-card-verde.selected      { border-color: #2e7d32; background: linear-gradient(180deg, #e8f5e9, #fff 60%); color: #2e7d32; }
+.afi-card-amarillo .afi-label { color: #b26a00; }
+.afi-card-amarillo:hover      { border-color: #ffb74d; background: #fffbe8; }
+.afi-card-amarillo.selected   { border-color: #f9a825; background: linear-gradient(180deg, #fff8d6, #fff 60%); color: #b26a00; }
+.afi-card-rojo .afi-label     { color: #c62828; }
+.afi-card-rojo:hover          { border-color: #ef9a9a; background: #fdeeee; }
+.afi-card-rojo.selected       { border-color: #c62828; background: linear-gradient(180deg, #ffe5e5, #fff 60%); color: #c62828; }
+.afi-card-blanco .afi-label   { color: #555; }
+.afi-card-blanco:hover        { border-color: #bdbdbd; background: #f5f5f5; }
+.afi-card-blanco.selected     { border-color: #757575; background: linear-gradient(180deg, #efefef, #fff 60%); color: #555; }
+
+@media (max-width: 600px) {
+  .afi-head { grid-template-columns: 30px auto 1fr 22px; gap: 8px; }
+  .afi-short { font-size: 0.82em; }
+}
