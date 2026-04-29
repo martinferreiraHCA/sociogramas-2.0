@@ -1166,3 +1166,27 @@ table.data-table tbody tr:hover { background: #fafafa; }
   text-align: center;
   padding: 6px 0;
 }
+
+/* ---------- Pantalla de diagnóstico de auth ---------- */
+.diag-box {
+  background: #f7f8fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+.diag-box pre {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 8px;
+  overflow-x: auto;
+  font-size: 0.8em;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 280px;
+}
+.diag-box code { background: #fff; padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+.diag-box summary { cursor: pointer; }
