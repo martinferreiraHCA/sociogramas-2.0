@@ -9,9 +9,13 @@
 // tu hoja. Para protección real, la validación fuerte vive del lado del
 // Apps Script (chequear código contra los tabs de clase de la Google Sheet
 // + hoja "completados" para evitar duplicados).
+//
+// El acceso al panel admin se hace con Google Sign-In limitado al dominio
+// que corresponda al colegio. El Apps Script verifica el id_token contra
+// Google y rechaza cualquier cuenta de otro dominio.
 window.APP_CONFIG = {
-  // Completá con la URL .../exec que te da Apps Script al hacer el deploy.
   APPS_SCRIPT_URL:   "https://script.google.com/macros/s/AKfycbwJlwMytUFEnAF6M-hvkMRsamdxJdzTh0IL6lwSd4Ji49wXy814vSQU8yBD9KmN66lbow/exec",
-  // Tiene que coincidir con CONFIG.TOKEN en apps-script/Code.gs.
   APPS_SCRIPT_TOKEN: "d7d1e6cb97cca059ffcdd126d5f4132a76e99442382f29cf",
+  GOOGLE_CLIENT_ID:  "263672487463-2ov3t4ah22caehpnbri341kaiud3n6u3.apps.googleusercontent.com",
+  ADMIN_DOMAIN:      "hca.edu.uy",
 };

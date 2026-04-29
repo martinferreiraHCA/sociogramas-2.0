@@ -13,22 +13,24 @@
  * Endpoints:
  *   POST /exec
  *     body { token, codigo, nombre, clase, respuestas }       → cuestionario
- *     body { action: "save_grupos", token_admin, ... }        → guardar grupos
- *     body { action: "crear_clase", token_admin, clase, nombres? }
- *     body { action: "agregar_estudiante", token_admin, clase, nombre }
- *     body { action: "generar_codigos", token_admin, clase }
- *     body { action: "eliminar_estudiante", token_admin, clase, codigo }
- *     body { action: "importar_estudiantes", token_admin, clase, estudiantes:[{codigo,nombre}], modo }
+ *     Para acciones admin todas llevan id_token (Google id_token JWT del
+ *     usuario logueado, dominio @ADMIN_DOMAIN):
+ *     body { action: "save_grupos", id_token, ... }
+ *     body { action: "crear_clase", id_token, clase, nombres? }
+ *     body { action: "agregar_estudiante", id_token, clase, nombre }
+ *     body { action: "generar_codigos", id_token, clase }
+ *     body { action: "eliminar_estudiante", id_token, clase, codigo }
+ *     body { action: "importar_estudiantes", id_token, clase, estudiantes:[{codigo,nombre}], modo }
  *
  *   GET /exec
- *     ?action=ping                              → healthcheck (público)
- *     ?action=admin_check&pw=...                → valida password admin
- *     ?action=login_cuestionario&codigo=...     → login de alumno (público)
- *     ?action=clases&pw=...                     → lista de clases con conteo
- *     ?action=estudiantes&pw=...[&clase=]       → estudiantes (todas o una clase)
- *     ?action=respuestas&pw=...                 → hoja `respuestas`
- *     ?action=completados&pw=...                → hoja `completados`
- *     ?action=grupos&pw=...[&clase=]            → grupos guardados
+ *     ?action=ping                                    → healthcheck (público)
+ *     ?action=admin_check&id_token=...                → valida Google id_token
+ *     ?action=login_cuestionario&codigo=...           → login de alumno (público)
+ *     ?action=clases&id_token=...                     → lista de clases con conteo
+ *     ?action=estudiantes&id_token=...[&clase=]       → estudiantes (todas o una clase)
+ *     ?action=respuestas&id_token=...                 → hoja `respuestas`
+ *     ?action=completados&id_token=...                → hoja `completados`
+ *     ?action=grupos&id_token=...[&clase=]            → grupos guardados
  *
  * Después de cambiar este archivo: "Implementar → Administrar
  * implementaciones → editar → Versión nueva".
@@ -37,7 +39,14 @@
 const CONFIG = {
   SHEET_ID: "1WpNz1Qj1elOq5GxEBNBGq8bOyhZw88SaRs0wx5Al76Q",
   TOKEN: "d7d1e6cb97cca059ffcdd126d5f4132a76e99442382f29cf",
+  // Contraseña heredada (no se usa para autorizar acciones nuevas, queda
+  // sólo por si querés volver a habilitar el modo password). El admin real
+  // ahora se valida con Google Sign-In + dominio.
   ADMIN_PASSWORD: "Colegio4392HCA",
+  // OAuth Client ID (Web application) creado en Google Cloud Console.
+  GOOGLE_CLIENT_ID: "263672487463-2ov3t4ah22caehpnbri341kaiud3n6u3.apps.googleusercontent.com",
+  // Sólo usuarios con email @ADMIN_DOMAIN pueden ejecutar acciones admin.
+  ADMIN_DOMAIN: "hca.edu.uy",
 };
 
 const HOJA_RESPUESTAS = "respuestas";
@@ -163,7 +172,8 @@ function saveGrupos(body) {
 }
 
 function crearClase(body) {
-  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const admin = verificarAdminToken(body.id_token);
+  if (!admin) return jsonResponse({ ok: false, error: "unauthorized" });
   const clase = String(body.clase || "").trim();
   if (!clase) return jsonResponse({ ok: false, error: "clase_vacia" });
   if (esHojaReservada(clase)) return jsonResponse({ ok: false, error: "nombre_reservado" });
@@ -189,7 +199,8 @@ function crearClase(body) {
 }
 
 function agregarEstudiante(body) {
-  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const admin = verificarAdminToken(body.id_token);
+  if (!admin) return jsonResponse({ ok: false, error: "unauthorized" });
   const clase = String(body.clase || "").trim();
   const nombre = String(body.nombre || "").trim();
   if (!clase || !nombre) return jsonResponse({ ok: false, error: "datos_incompletos" });
@@ -203,7 +214,8 @@ function agregarEstudiante(body) {
 }
 
 function eliminarEstudiante(body) {
-  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const admin = verificarAdminToken(body.id_token);
+  if (!admin) return jsonResponse({ ok: false, error: "unauthorized" });
   const clase = String(body.clase || "").trim();
   const codigo = String(body.codigo || "").trim();
   if (!clase || !codigo) return jsonResponse({ ok: false, error: "datos_incompletos" });
@@ -224,40 +236,82 @@ function eliminarEstudiante(body) {
   return jsonResponse({ ok: true, borrados });
 }
 
-// Diagnóstico sin revelar la password: compara longitudes, first/last char y
-// char codes. No devuelve la password, sólo información suficiente para
-// detectar espacios al final, case mismatch u otros caracteres invisibles.
+// Diagnóstico de autenticación con Google. Verifica el id_token contra el
+// endpoint público de Google y devuelve metadata útil (no expone secretos).
 function debugAuth(body) {
-  const sent = String((body && body.token_admin) || "");
-  const expected = String(CONFIG.ADMIN_PASSWORD || "");
-  const codesSent = [];
-  const codesExpected = [];
-  for (let i = 0; i < sent.length; i++) codesSent.push(sent.charCodeAt(i));
-  for (let i = 0; i < expected.length; i++) codesExpected.push(expected.charCodeAt(i));
-  const preview = (s) =>
-    s.length <= 3 ? s.replace(/./g, "*")
-    : s.charAt(0) + "***" + s.charAt(s.length - 1) + " [len=" + s.length + "]";
+  const idToken = String((body && body.id_token) || "");
+  if (!idToken) {
+    return jsonResponse({ ok: true, match: false, reason: "sin_id_token" });
+  }
+  const info = consultarTokenInfo(idToken);
+  if (!info) {
+    return jsonResponse({
+      ok: true, match: false, reason: "tokeninfo_falló",
+      sent_length: idToken.length,
+      expected_audience: CONFIG.GOOGLE_CLIENT_ID,
+      expected_domain: CONFIG.ADMIN_DOMAIN,
+    });
+  }
+  const audOk = info.aud === CONFIG.GOOGLE_CLIENT_ID;
+  const domainOk = String(info.email || "").toLowerCase().endsWith("@" + CONFIG.ADMIN_DOMAIN.toLowerCase());
+  const emailVerified = info.email_verified === "true" || info.email_verified === true;
+  const expira = info.exp ? new Date(Number(info.exp) * 1000).toISOString() : null;
   return jsonResponse({
     ok: true,
-    match: sent === expected,
-    sent_length: sent.length,
-    expected_length: expected.length,
-    sent_preview: preview(sent),
-    expected_preview: preview(expected),
-    first_diff_index: firstDiffIndex(sent, expected),
-    sent_charcodes: codesSent,
-    expected_charcodes: codesExpected,
+    match: audOk && domainOk && emailVerified,
+    audience_ok: audOk,
+    domain_ok: domainOk,
+    email_verified: emailVerified,
+    email: info.email || null,
+    name: info.name || null,
+    aud_received: info.aud || null,
+    aud_expected: CONFIG.GOOGLE_CLIENT_ID,
+    domain_expected: CONFIG.ADMIN_DOMAIN,
+    expira,
   });
 }
 
-function firstDiffIndex(a, b) {
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) if (a.charCodeAt(i) !== b.charCodeAt(i)) return i;
-  return a.length === b.length ? -1 : n;
+// Llama al endpoint de Google y devuelve los claims si el token es válido y
+// pertenece a una cuenta del dominio configurado, o null si no.
+// Cachea el resultado por unos minutos para no martillar la API en cada llamada.
+function verificarAdminToken(idToken) {
+  if (!idToken) return null;
+  const info = consultarTokenInfo(idToken);
+  if (!info) return null;
+  if (info.aud !== CONFIG.GOOGLE_CLIENT_ID) return null;
+  if (!(info.email_verified === "true" || info.email_verified === true)) return null;
+  const email = String(info.email || "").toLowerCase();
+  if (!email.endsWith("@" + String(CONFIG.ADMIN_DOMAIN).toLowerCase())) return null;
+  if (info.exp && Number(info.exp) * 1000 < Date.now()) return null;
+  return { email: info.email, name: info.name || info.email };
+}
+
+function consultarTokenInfo(idToken) {
+  const cache = CacheService.getScriptCache();
+  const key = "tok:" + Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, idToken)
+    .map(b => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0")).join("");
+  const cached = cache.get(key);
+  if (cached) return JSON.parse(cached);
+  try {
+    const r = UrlFetchApp.fetch(
+      "https://www.googleapis.com/oauth2/v3/tokeninfo?id_token=" + encodeURIComponent(idToken),
+      { muteHttpExceptions: true }
+    );
+    if (r.getResponseCode() !== 200) return null;
+    const info = JSON.parse(r.getContentText());
+    // Cache hasta el exp del token o 5 min (lo que ocurra antes).
+    const ttl = Math.max(60, Math.min(300, info.exp ? Number(info.exp) - Math.floor(Date.now()/1000) : 300));
+    cache.put(key, JSON.stringify(info), ttl);
+    return info;
+  } catch (e) {
+    console.error("consultarTokenInfo:", e);
+    return null;
+  }
 }
 
 function importarEstudiantes(body) {
-  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const admin = verificarAdminToken(body.id_token);
+  if (!admin) return jsonResponse({ ok: false, error: "unauthorized" });
   const clase = String(body.clase || "").trim();
   if (!clase) return jsonResponse({ ok: false, error: "clase_vacia" });
   if (esHojaReservada(clase)) return jsonResponse({ ok: false, error: "nombre_reservado" });
@@ -343,7 +397,8 @@ function importarEstudiantes(body) {
 }
 
 function generarCodigos(body) {
-  if (body.token_admin !== CONFIG.ADMIN_PASSWORD) return jsonResponse({ ok: false, error: "forbidden" });
+  const admin = verificarAdminToken(body.id_token);
+  if (!admin) return jsonResponse({ ok: false, error: "unauthorized" });
   const clase = String(body.clase || "").trim();
   if (!clase) return jsonResponse({ ok: false, error: "clase_vacia" });
 
@@ -386,15 +441,18 @@ function doGet(e) {
       return jsonResponse({ ok: true, service: "sociogramas", time: new Date() });
     }
     if (action === "admin_check") {
-      return jsonResponse({ ok: params.pw === CONFIG.ADMIN_PASSWORD });
+      // Validamos un Google id_token y devolvemos el email del admin si pasó.
+      const admin = verificarAdminToken(params.id_token);
+      return jsonResponse({ ok: !!admin, email: admin && admin.email, name: admin && admin.name });
     }
     if (action === "login_cuestionario") {
       return loginCuestionario(String(params.codigo || "").trim());
     }
 
-    // A partir de acá, todo requiere password.
-    if (params.pw !== CONFIG.ADMIN_PASSWORD) {
-      return jsonResponse({ ok: false, error: "forbidden" });
+    // A partir de acá, todas las acciones requieren un id_token válido.
+    const admin = verificarAdminToken(params.id_token);
+    if (!admin) {
+      return jsonResponse({ ok: false, error: "unauthorized" });
     }
     const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
     if (action === "clases") {
