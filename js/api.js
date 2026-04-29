@@ -45,6 +45,7 @@
           numero: parseInt(p.numero, 10),
           texto:  (p.texto || "").trim(),
           tipo:   (p.tipo  || "").trim().toUpperCase(),
+          meta:   (p.meta  || "").trim(),
         }))
         .filter(p => p.numero && p.texto)
         .sort((a, b) => a.numero - b.numero),

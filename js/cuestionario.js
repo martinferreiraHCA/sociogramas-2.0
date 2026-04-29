@@ -108,17 +108,34 @@
   function renderInstrucciones() {
     const cont = el("div", { class: "panel-container" });
     cont.innerHTML = `
-      <h2 class="panel-form-title">Instrucciones</h2>
-      <div style="margin-top:12px;line-height:1.5">
-        <p class="mb-12">✅ La información es confidencial y solo será leída por tu referente.</p>
-        <p class="mb-12">🎯 El objetivo es armar grupos de trabajo donde todos se sientan cómodos, puedan colaborar, aprender y participar.</p>
-        <p class="mb-12">✋ <b>No estamos preguntando si te llevás bien o mal con alguien, ni si son amigos.</b> Respondé según tu experiencia real al trabajar en grupo.</p>
-        <h3 class="mb-12 mt-24">Cómo completar la encuesta</h3>
-        <p class="mb-12">🟩 <b>VERDE</b> – Me gusta trabajar con esta persona</p>
-        <p class="mb-12">🟨 <b>AMARILLO</b> – A veces sí, a veces no</p>
-        <p class="mb-12">🟥 <b>ROJO</b> – Me resulta muy difícil trabajar con esta persona</p>
-        <p class="mb-12">⚪ <b>BLANCO</b> – No tengo suficientes experiencias de trabajo con esta persona</p>
-        <p class="mb-12">🧠 No hay respuestas correctas o incorrectas. Tus respuestas nos ayudan a pensar grupos más justos.</p>
+      <h2 class="panel-form-title">Introducción</h2>
+      <div class="cuest-intro">
+        <p class="mb-12">En esta encuesta vas a compartir cómo es trabajar con tus compañeros/as en actividades de clase.</p>
+        <p class="mb-12">🎯 El objetivo es armar grupos donde todos puedan participar, aprender y sentirse cómodos.</p>
+        <p class="mb-12">🔒 Tus respuestas son confidenciales y solo serán utilizadas por el equipo docente.</p>
+        <p class="mb-12">⚠️ <b>Importante:</b> no estamos evaluando si te llevás bien o mal con alguien, sino cómo funciona el trabajo en grupo.</p>
+
+        <h3 class="cuest-intro-title">Cómo completar la encuesta</h3>
+        <p class="mb-12">🧠 Elegí una opción por cada compañero/a según cómo fue trabajar juntos/as en actividades reales. <b>No hay respuestas correctas o incorrectas.</b> Tus respuestas nos ayudan a pensar grupos más justos, cómodos y donde todos y todas puedan participar mejor.</p>
+        <p class="mb-12">✅ Usá estos colores y leé bien lo que significa cada uno:</p>
+
+        <div class="cuest-color cuest-color-verde">
+          <div class="cuest-color-head">🟩 <b>VERDE</b> – Se trabaja muy bien con este/a compañero/a</div>
+          <div>👉 Esta persona participa, escucha, propone ideas, cumple con las tareas, ayuda a otros y respeta los tiempos y espacios del grupo. Con ella el trabajo fluye, se avanza y es más fácil ponerse de acuerdo. Te sentís cómodo/a, incluido/a y hay respeto.</div>
+        </div>
+        <div class="cuest-color cuest-color-amarillo">
+          <div class="cuest-color-head">🟨 <b>AMARILLO</b> – A veces se trabaja bien, otras no</div>
+          <div>👉 Hay días o tareas en las que trabajar con esta persona funciona bien, pero otras veces se distrae, interrumpe o no cumple. Tal vez se pone las pilas si el grupo lo motiva, pero también puede hablar más de lo que trabaja, o dejar las cosas a medias. A veces te resulta fácil, otras veces, frustrante.</div>
+        </div>
+        <div class="cuest-color cuest-color-rojo">
+          <div class="cuest-color-head">🟥 <b>ROJO</b> – Me resulta muy difícil trabajar con este/a compañero/a</div>
+          <div>👉 Esta persona interrumpe, se queja sin ayudar, no cumple con las tareas, o incluso maltrata, critica sin aportar o ignora al grupo. Puede generar conflictos, desconcentración o tensión. Sentís que trabajar con ella te hace más difícil aprender o avanzar.</div>
+        </div>
+        <div class="cuest-color cuest-color-blanco">
+          <div class="cuest-color-head">⚪ <b>BLANCO</b> – No tengo suficiente experiencia trabajando juntos/as</div>
+          <div>👉 No trabajaste con esta persona en ningún grupo, o fue tan poco que no podés opinar con certeza. Tal vez te llevás bien o mal, pero no tuviste experiencia real trabajando juntos/as.</div>
+        </div>
+
         <hr style="margin:18px 0" />
         <div class="text-center">
           <button class="btn" id="btn-comenzar">Comenzar</button>
@@ -155,10 +172,16 @@
 
     const cont = el("div", { class: "panel-container" });
     cont.appendChild(progressBar(estado.indiceCompanero, companeros.length));
-    cont.appendChild(el("p", { class: "cuestionario-pregunta-texto" }, preg.texto));
+    // Soportamos {nombre} como placeholder en el texto de la pregunta para
+    // que se pueda escribir "¿Cómo es trabajar con {nombre}?" en preguntas.csv.
+    const tieneNombre = /\{nombre\}/i.test(preg.texto);
+    const tituloFinal = preg.texto.replace(/\{nombre\}/gi, compa.nombre);
+    cont.appendChild(el("p", { class: "cuestionario-pregunta-texto" }, tituloFinal));
 
     const centro = el("div", { class: "cuestionario-centro" });
-    centro.appendChild(el("div", { class: "cuestionario-nombre-estudiante" }, compa.nombre));
+    if (!tieneNombre) {
+      centro.appendChild(el("div", { class: "cuestionario-nombre-estudiante" }, compa.nombre));
+    }
 
     const selectorWrap = el("div", { class: "cuestionario-opciones-container" });
     const select = el("select", { class: "cuestionario-select" });
@@ -300,15 +323,98 @@
 
     const preg = arr[estado.indiceAdicional];
     const seleccionados = estado.adicionales[preg.numero] || [];
+    estado.bloqueantes = estado.bloqueantes || {};
+    const bloqueantesActivas = estado.bloqueantes[preg.numero] || [];
+
+    // Meta de la pregunta (max=N, etc.)
+    const meta = parseMeta(preg.meta);
+    const maxN = parseInt(meta.max, 10) || 0;
+
+    // Opciones de la pregunta marcadas como bloqueantes (texto con prefijo
+    // "[BLOQ]" en data/opciones.csv).
+    const opcionesPreg = (opcionesPorNumero[preg.numero] || []);
+    const bloqueantes = opcionesPreg.filter(o => /^\[BLOQ\]/i.test(o.texto)).map(o => ({
+      orden: o.orden,
+      texto: o.texto.replace(/^\[BLOQ\]\s*/i, ""),
+    }));
+    const hayBloqueante = bloqueantesActivas.length > 0;
 
     const cont = el("div", { class: "panel-container" });
     cont.appendChild(progressBar(estado.indiceAdicional, arr.length));
     cont.appendChild(el("div", { class: "cuestionario-pregunta-titulo" }, preg.texto));
 
     const wrap = el("div", { class: "cuestionario-estudiantes-lista" });
-    wrap.appendChild(el("p", { class: "muted mb-12" },
-      "Seleccioná a los compañeros que cumplen con esta característica (podés elegir varios o ninguno)."));
-    const list = el("div", { class: "cuestionario-estudiantes-container" });
+    const ayuda = maxN
+      ? `Podés elegir hasta ${maxN} compañero(s).`
+      : "Seleccioná a los compañeros que cumplen con esto (podés elegir varios o ninguno).";
+    wrap.appendChild(el("p", { class: "muted mb-12" }, ayuda));
+
+    const errEl = el("div", { class: "cuestionario-error hidden", id: "ad-err" });
+    wrap.appendChild(errEl);
+
+    function setError(msg) { errEl.textContent = msg; errEl.classList.remove("hidden"); }
+    function clearError() { errEl.classList.add("hidden"); errEl.textContent = ""; }
+
+    function refrescar() { render(); }
+
+    function setBloqueante(orden, on) {
+      const cur = new Set(estado.bloqueantes[preg.numero] || []);
+      if (on) {
+        // Las bloqueantes son mutuamente exclusivas + limpian las selecciones.
+        cur.clear(); cur.add(orden);
+        estado.adicionales[preg.numero] = [];
+      } else {
+        cur.delete(orden);
+      }
+      estado.bloqueantes[preg.numero] = Array.from(cur);
+      persist(); refrescar();
+    }
+
+    function setPeer(codigo, on) {
+      let cur = estado.adicionales[preg.numero] || [];
+      if (on) {
+        if (maxN && cur.length >= maxN) {
+          setError(`Ya seleccionaste ${maxN}. Quitá uno antes de agregar otro.`);
+          return false;
+        }
+        cur = Array.from(new Set([...cur, codigo]));
+        // Tildar un compañero limpia las bloqueantes activas.
+        if (estado.bloqueantes[preg.numero] && estado.bloqueantes[preg.numero].length) {
+          estado.bloqueantes[preg.numero] = [];
+        }
+        clearError();
+      } else {
+        cur = cur.filter(x => x !== codigo);
+      }
+      estado.adicionales[preg.numero] = cur;
+      persist(); refrescar();
+      return true;
+    }
+
+    // 1. Bloque de opciones bloqueantes (si las hay).
+    if (bloqueantes.length) {
+      const blk = el("div", { class: "cuestionario-bloqueantes" });
+      bloqueantes.forEach(b => {
+        const item = el("div", { class: "cuestionario-estudiante-item" });
+        const cb = el("input", {
+          type: "checkbox",
+          class: "cuestionario-estudiante-checkbox",
+          id: "bloq-" + b.orden,
+        });
+        cb.checked = bloqueantesActivas.includes(b.orden);
+        cb.addEventListener("change", () => setBloqueante(b.orden, cb.checked));
+        const lbl = el("label", {
+          for: "bloq-" + b.orden,
+          class: "cuestionario-estudiante-label",
+        }, b.texto);
+        item.appendChild(cb); item.appendChild(lbl);
+        blk.appendChild(item);
+      });
+      wrap.appendChild(blk);
+    }
+
+    // 2. Lista de compañeros (deshabilitada si hay bloqueante activa).
+    const list = el("div", { class: "cuestionario-estudiantes-container" + (hayBloqueante ? " disabled" : "") });
     if (!companeros.length) {
       list.appendChild(el("p", { class: "muted" }, "No hay compañeros para evaluar."));
     } else {
@@ -320,12 +426,9 @@
           id: "ad-" + c.codigo,
         });
         cb.checked = seleccionados.includes(c.codigo);
+        cb.disabled = hayBloqueante;
         cb.addEventListener("change", () => {
-          let cur = estado.adicionales[preg.numero] || [];
-          if (cb.checked) cur = Array.from(new Set([...cur, c.codigo]));
-          else cur = cur.filter(x => x !== c.codigo);
-          estado.adicionales[preg.numero] = cur;
-          persist();
+          if (!setPeer(c.codigo, cb.checked)) cb.checked = !cb.checked;
         });
         const lbl = el("label", {
           for: "ad-" + c.codigo,
@@ -367,6 +470,17 @@
       `Pregunta ${estado.indiceAdicional + 1} de ${arr.length}`));
 
     root.appendChild(cont);
+  }
+
+  // Parsea cosas como "max=3" o "max=3;extra=foo" del campo meta de preguntas.csv.
+  function parseMeta(m) {
+    const out = {};
+    if (!m) return out;
+    String(m).split(";").forEach(p => {
+      const [k, v] = p.split("=").map(s => (s || "").trim());
+      if (k) out[k] = (v == null ? "" : v);
+    });
+    return out;
   }
 
   function progressBar(i, n) {
@@ -449,6 +563,26 @@
           evaluado_codigo: compa.codigo,
           evaluado_nombre: compa.nombre,
           opcion_texto: "",
+          otro_texto: "",
+        });
+      });
+    });
+
+    // Bloqueantes (opciones tipo "Ninguno/a en particular" en SELECCION_COMPANEROS).
+    // Se guardan como filas sin evaluado, con la opción en opcion_texto.
+    Object.entries(estado.bloqueantes || {}).forEach(([numStr, ordenes]) => {
+      const preg = preguntaPorNumero[parseInt(numStr, 10)];
+      if (!preg) return;
+      const opciones = opcionesPorNumero[preg.numero] || [];
+      (ordenes || []).forEach(orden => {
+        const op = opciones.find(o => o.orden === orden);
+        if (!op) return;
+        respuestas.push({
+          numero_pregunta: preg.numero,
+          texto_pregunta: preg.texto,
+          evaluado_codigo: "",
+          evaluado_nombre: "",
+          opcion_texto: op.texto.replace(/^\[BLOQ\]\s*/i, ""),
           otro_texto: "",
         });
       });

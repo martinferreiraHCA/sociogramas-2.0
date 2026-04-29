@@ -1,11 +1,12 @@
-numero,texto,tipo
-1,¿Cómo es trabajar con esta persona?,AFINIDAD
-2,¿Por qué te gusta trabajar con esta persona?,MULTIPLE
-3,"¿Qué hace que a veces funcione y otras no?",MULTIPLE
-4,¿Qué te dificulta al trabajar con esta persona?,MULTIPLE
-5,¿Quiénes ayudan a que el grupo funcione bien?,SELECCION_COMPANEROS
-6,¿Quiénes te hacen sentir parte del grupo cuando trabajan juntos/as?,SELECCION_COMPANEROS
-7,¿Quiénes suelen tomar el rol de líder cuando trabajan en grupo?,SELECCION_COMPANEROS
-8,¿Quiénes suelen quedarse sin grupo o no ser elegidos/as cuando hay que formar equipos?,SELECCION_COMPANEROS
-9,¿Quiénes creés que necesitan más apoyo para poder trabajar mejor en grupo?,SELECCION_COMPANEROS
-10,¿Con quién te cuesta más trabajar en grupo?,SELECCION_COMPANEROS
+numero,texto,tipo,meta
+1,¿Cómo es trabajar con {nombre}?,AFINIDAD,
+2,¿Por qué te gusta trabajar con este compañero/a? (Podés elegir más de una opción),MULTIPLE,
+3,¿Qué hace que a veces funcione y otras no? (Podés elegir más de una opción),MULTIPLE,
+4,¿Qué te dificulta al trabajar con este compañero/a? (Podés elegir más de una opción),MULTIPLE,
+5,¿Con quiénes te gustaría trabajar en grupo? (Podés elegir más de uno/a),SELECCION_COMPANEROS,
+6,"¿Con quién creés que podrías trabajar bien aunque todavía no lo hayas hecho mucho? Podés elegir hasta 3.",SELECCION_COMPANEROS,max=3
+7,"¿Quiénes ayudan a que el grupo funcione bien? Pensá en compañeros/as que proponen ideas, organizan el trabajo, resuelven problemas o ayudan a otros/as a seguir.",SELECCION_COMPANEROS,
+8,¿Quiénes te hacen sentir parte del grupo cuando trabajan juntos/as?,SELECCION_COMPANEROS,
+9,"¿Quiénes suelen tomar el rol de líder cuando trabajan en grupo? (Puede ser porque organizan, deciden, motivan o guían al grupo.)",SELECCION_COMPANEROS,
+10,"¿Quiénes creés que necesitan más apoyo para poder trabajar mejor en grupo? (Puede ser por timidez, distracción o problemas con otros/as.)",SELECCION_COMPANEROS,
+11,"¿Con quién te cuesta más trabajar en grupo? (Pensá en personas que no escuchan, no cumplen o generan conflictos.)",SELECCION_COMPANEROS,
