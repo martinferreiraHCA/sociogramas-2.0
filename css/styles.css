@@ -1253,3 +1253,22 @@ table.data-table tbody tr:hover { background: #fafafa; }
   color: #fff;
   box-shadow: 0 4px 14px rgba(46,125,50,0.3);
 }
+
+/* ---------- Panel de respuestas pendientes (offline) ---------- */
+.cuest-pendiente-info {
+  background: #fff8ec;
+  border: 1px solid #ffe0b2;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin: 0 auto;
+  max-width: 480px;
+  text-align: left;
+}
+.cuest-pend-row {
+  display: flex; justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed #ffe0b2;
+  font-size: 0.9em;
+}
+.cuest-pend-row:last-child { border-bottom: none; }
+.cuest-pend-row span { color: #8d6e00; }

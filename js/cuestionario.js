@@ -16,6 +16,7 @@
   const codigo = U.getQueryParam("codigo");
   const $ = U.$, el = U.el;
   const STATE_KEY = codigo ? `cuest:${codigo}` : null;
+  const QUEUE_KEY = "cuest-queue";
   const root = $("#cuestionario-root");
 
   if (!codigo) {
@@ -49,10 +50,28 @@
 
   function persist() { U.lsSet(STATE_KEY, estado); }
 
-  init().catch(err => {
-    console.error(err);
-    root.innerHTML = '<div class="panel-container"><p>Error cargando el cuestionario. Revisá la consola.</p></div>';
-  });
+  // Si el alumno ya envió las respuestas pero el submit quedó en cola
+  // (offline), mostramos directamente el panel de pendiente y NO arrancamos
+  // de cero el cuestionario. Las funciones que se usan acá están hoisteadas
+  // (declaraciones), pero accedemos a QUEUE_KEY que ya está definida arriba.
+  const pendOnLoad = pendienteParaCodigo(codigo);
+  if (pendOnLoad) {
+    // Reconstruir lo mínimo que necesita header() / submit retry sin pasar
+    // por init() (que requiere conexión).
+    if (pendOnLoad.payload && pendOnLoad.payload.estudiante) {
+      estudiante = pendOnLoad.payload.estudiante;
+    } else {
+      estudiante = { codigo: pendOnLoad.codigo, nombre: pendOnLoad.nombre || pendOnLoad.codigo, clase: "" };
+    }
+    renderPendiente("Tus respuestas estaban pendientes de envío en este dispositivo.");
+    flushQueue();
+    programarReintento();
+  } else {
+    init().catch(err => {
+      console.error(err);
+      root.innerHTML = '<div class="panel-container"><p>Error cargando el cuestionario. Revisá la consola.</p></div>';
+    });
+  }
 
   async function init() {
     root.innerHTML = '<div class="panel-container"><p>Cargando…</p></div>';
@@ -704,28 +723,161 @@
 
     try {
       const res = await API.submitRespuestas({ estudiante, respuestas });
-      if (!res || !res.ok) {
-        const map = {
-          ya_completado: "Este código ya envió sus respuestas.",
-          codigo_invalido: "Código de estudiante inválido.",
-          forbidden: "El token del front no coincide con el del Apps Script.",
-          sin_respuestas: "No hay respuestas para enviar.",
-        };
-        const msg = (res && map[res.error]) || "No se pudieron guardar las respuestas.";
-        root.querySelector(".panel-container").innerHTML =
-          `<p class="cuestionario-error">${U.escapeHtml(msg)}</p>
-           <div class="text-center mt-16"><a class="btn" href="./index.html">Volver al inicio</a></div>`;
+      if (res && res.ok) {
+        U.lsDel(STATE_KEY);
+        estado.step = "finalizado";
+        renderFinalizado();
         return;
       }
-      U.lsDel(STATE_KEY);
-      estado.step = "finalizado";
-      renderFinalizado();
-    } catch (err) {
-      console.error(err);
+      // Errores del servidor: distinguimos los recuperables (que reintentamos
+      // en background) de los terminales (que mostramos al alumno).
+      const codigoErr = res && res.error;
+      const recuperables = new Set(["lock_timeout", "server_error", "empty_body", "invalid_json", "respuesta_no_json"]);
+      if (codigoErr && recuperables.has(codigoErr)) {
+        encolarYMostrar({ estudiante, respuestas }, "El servidor está ocupado. Tus respuestas quedan en cola y se reintentan solas.");
+        return;
+      }
+      const map = {
+        ya_completado: "Este código ya envió sus respuestas.",
+        codigo_invalido: "Código de estudiante inválido.",
+        forbidden: "El token del front no coincide con el del Apps Script.",
+        sin_respuestas: "No hay respuestas para enviar.",
+      };
+      const msg = map[codigoErr] || `No se pudieron guardar las respuestas (${codigoErr || "error desconocido"}).`;
       root.querySelector(".panel-container").innerHTML =
-        `<p class="cuestionario-error">Hubo un error de conexión. Probá de nuevo en unos minutos.</p>
-         <div class="text-center mt-16"><button class="btn" onclick="location.reload()">Reintentar</button></div>`;
+        `<p class="cuestionario-error">${U.escapeHtml(msg)}</p>
+         <div class="text-center mt-16"><a class="btn" href="./index.html">Volver al inicio</a></div>`;
+    } catch (err) {
+      console.error("submitRespuestas red:", err);
+      // Sin internet o el endpoint no responde → cola persistente.
+      encolarYMostrar({ estudiante, respuestas }, "No hay conexión a internet. Tus respuestas quedaron guardadas en este dispositivo y se enviarán solas en cuanto vuelva la conexión.");
     }
+  }
+
+  // ---------- Cola persistente para envíos sin internet ----------
+  // La cola vive en localStorage como un array de { codigo, payload, intentos,
+  // primerError, lastError, encoladoEn }. Un único timer + el evento
+  // window.online disparan flushQueue() en cuanto haya conexión.
+  let flushTimer = null;
+  let flushing = false;
+
+  function getQueue() { return U.lsGet(QUEUE_KEY, []) || []; }
+  function setQueue(q) { U.lsSet(QUEUE_KEY, q); }
+  function pendienteParaCodigo(cod) { return getQueue().find(it => it.codigo === cod); }
+
+  function encolarYMostrar(payload, mensaje) {
+    const q = getQueue();
+    // Evitar duplicados para el mismo código.
+    const existente = q.findIndex(it => it.codigo === payload.estudiante.codigo);
+    const item = {
+      codigo: payload.estudiante.codigo,
+      nombre: payload.estudiante.nombre,
+      payload,
+      intentos: 0,
+      lastError: "",
+      encoladoEn: new Date().toISOString(),
+    };
+    if (existente >= 0) q[existente] = Object.assign({}, q[existente], item);
+    else q.push(item);
+    setQueue(q);
+    U.lsDel(STATE_KEY);
+    estado.step = "pendiente";
+    renderPendiente(mensaje);
+    programarReintento();
+    flushQueue(); // intento inmediato
+  }
+
+  function programarReintento() {
+    if (flushTimer) return;
+    if (!getQueue().length) return;
+    flushTimer = setInterval(() => {
+      if (!getQueue().length) {
+        clearInterval(flushTimer); flushTimer = null;
+        return;
+      }
+      flushQueue();
+    }, 30000);
+  }
+
+  async function flushQueue() {
+    if (flushing) return;
+    flushing = true;
+    try {
+      let q = getQueue();
+      if (!q.length) return;
+      const restantes = [];
+      for (const item of q) {
+        try {
+          const r = await API.submitRespuestas(item.payload);
+          if (r && r.ok) continue;                 // enviado OK
+          if (r && r.error === "ya_completado") continue; // backend ya tiene la respuesta
+          // Errores no reintentables: los marcamos pero los sacamos para no quedar
+          // pegados (codigo_invalido, forbidden, sin_respuestas).
+          if (r && ["codigo_invalido", "forbidden", "sin_respuestas"].includes(r.error)) {
+            console.warn(`[cola] descarto ${item.codigo}: ${r.error}`);
+            continue;
+          }
+          item.intentos = (item.intentos || 0) + 1;
+          item.lastError = (r && r.error) || "respuesta_invalida";
+          restantes.push(item);
+        } catch (err) {
+          item.intentos = (item.intentos || 0) + 1;
+          item.lastError = "red:" + (err.message || err);
+          restantes.push(item);
+        }
+      }
+      setQueue(restantes);
+      // Si la cola del estudiante actual quedó vacía, pasamos a "finalizado".
+      if (estado.step === "pendiente" && !pendienteParaCodigo(codigo)) {
+        estado.step = "finalizado";
+        renderFinalizado();
+      } else if (estado.step === "pendiente") {
+        // Re-renderizar el panel con la info actualizada.
+        const it = pendienteParaCodigo(codigo);
+        if (it) actualizarPanelPendiente(it);
+      }
+      if (!restantes.length && flushTimer) {
+        clearInterval(flushTimer); flushTimer = null;
+      }
+    } finally {
+      flushing = false;
+    }
+  }
+
+  function renderPendiente(mensajePrincipal) {
+    root.innerHTML = "";
+    root.appendChild(header());
+    const cont = el("div", { class: "panel-container cuestionario-finalizado" });
+    cont.innerHTML = `
+      <h2 class="cuestionario-titulo-finalizado">⏳ Respuestas pendientes</h2>
+      <p class="mb-16">${U.escapeHtml(mensajePrincipal || "Tus respuestas están guardadas en este dispositivo.")}</p>
+      <div class="cuest-pendiente-info" id="pend-info"></div>
+      <p class="muted mt-16">Podés cerrar la página: cuando vuelva la conexión y abras el cuestionario de nuevo se reintenta automáticamente.</p>
+      <div class="flex-row mt-16" style="gap:8px;justify-content:center">
+        <button class="btn" id="btn-reintentar-ya">Reintentar ahora</button>
+        <a class="btn btn-gray" href="./index.html">Volver al inicio</a>
+      </div>`;
+    root.appendChild(cont);
+    cont.querySelector("#btn-reintentar-ya").addEventListener("click", async () => {
+      const btn = cont.querySelector("#btn-reintentar-ya");
+      btn.disabled = true; btn.textContent = "Enviando…";
+      await flushQueue();
+      btn.disabled = false; btn.textContent = "Reintentar ahora";
+    });
+    const it = pendienteParaCodigo(codigo);
+    if (it) actualizarPanelPendiente(it);
+  }
+
+  function actualizarPanelPendiente(it) {
+    const info = document.getElementById("pend-info");
+    if (!info) return;
+    const online = navigator.onLine;
+    info.innerHTML = `
+      <div class="cuest-pend-row"><span>Estado de la red</span><b style="color:${online ? "#2e7d32" : "#c62828"}">${online ? "✅ Online" : "❌ Sin conexión"}</b></div>
+      <div class="cuest-pend-row"><span>Encolado</span><b>${new Date(it.encoladoEn).toLocaleString()}</b></div>
+      <div class="cuest-pend-row"><span>Intentos</span><b>${it.intentos || 0}</b></div>
+      ${it.lastError ? `<div class="cuest-pend-row"><span>Último error</span><b>${U.escapeHtml(it.lastError)}</b></div>` : ""}
+    `;
   }
 
   function renderFinalizado() {
@@ -738,4 +890,9 @@
       <a class="btn" href="./index.html">Volver al inicio</a>`;
     root.appendChild(cont);
   }
+
+  // Triggers de flush automáticos: cuando vuelve la conexión + un boot
+  // diferido si hay algo en la cola al arrancar.
+  window.addEventListener("online", () => { flushQueue(); programarReintento(); });
+  if (getQueue().length) { setTimeout(flushQueue, 800); programarReintento(); }
 })();
