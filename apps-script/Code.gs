@@ -44,7 +44,7 @@ const CONFIG = {
   // ahora se valida con Google Sign-In + dominio.
   ADMIN_PASSWORD: "Colegio4392HCA",
   // OAuth Client ID (Web application) creado en Google Cloud Console.
-  GOOGLE_CLIENT_ID: "263672487463-2ov3t4ah22caehpnbri341kaiud3n6u3.apps.googleusercontent.com",
+  GOOGLE_CLIENT_ID: "1096411533432-sdaj35tq8q0gvq0sir5k008ru59b6sfa.apps.googleusercontent.com",
   // Sólo usuarios con email @ADMIN_DOMAIN pueden ejecutar acciones admin.
   ADMIN_DOMAIN: "hca.edu.uy",
 };
