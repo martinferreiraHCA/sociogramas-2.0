@@ -382,6 +382,27 @@
     return respuesta !== esperado;
   }
 
+  // Navegación con salto bidireccional sobre preguntas condicionales.
+  function avanzarIndice(arr, delta) {
+    let idx = estado.indiceAdicional + delta;
+    while (idx >= 0 && idx < arr.length && debeSaltar(arr[idx])) idx += delta;
+    estado.indiceAdicional = idx;
+  }
+  function irAtras(arr) {
+    avanzarIndice(arr, -1);
+    if (estado.indiceAdicional < 0) {
+      // Volvemos al último compañero del paso de afinidad.
+      estado.indiceAdicional = 0;
+      estado.step = "afinidad";
+      estado.indiceCompanero = Math.max(0, companeros.length - 1);
+    }
+    persist(); render();
+  }
+  function irAdelante(arr) {
+    avanzarIndice(arr, 1);
+    persist(); render();
+  }
+
   function renderAdicionales() {
     const arr = preguntasAdicionales();
     if (!arr.length) return submitAll();
@@ -531,27 +552,29 @@
     cont.appendChild(wrap);
 
     const navBtns = el("div", { class: "flex-row mt-16", style: "justify-content:center" });
-    if (estado.indiceAdicional > 0) {
-      navBtns.appendChild(el("button", {
-        class: "btn btn-gray",
-        onclick: () => { estado.indiceAdicional--; persist(); render(); },
-      }, "Atrás"));
-    } else {
-      navBtns.appendChild(el("button", {
-        class: "btn btn-gray",
-        onclick: () => {
-          estado.step = "afinidad";
-          estado.indiceCompanero = Math.max(0, companeros.length - 1);
-          persist(); render();
-        },
-      }, "Atrás"));
-    }
+    navBtns.appendChild(el("button", {
+      class: "btn btn-gray",
+      onclick: () => irAtras(arr),
+    }, "Atrás"));
     const esUltima = estado.indiceAdicional >= arr.length - 1;
     navBtns.appendChild(el("button", {
       class: "btn",
       onclick: () => {
+        // Toda SELECCION_COMPANEROS es obligatoria: debe haber al menos un
+        // compañero seleccionado o una opción bloqueante (ej. "Ninguno").
+        const cods = estado.adicionales[preg.numero] || [];
+        const blo = (estado.bloqueantes && estado.bloqueantes[preg.numero]) || [];
+        if (!cods.length && !blo.length) {
+          const tieneNinguno = bloqueantes.length > 0;
+          const msg = tieneNinguno
+            ? 'Tenés que elegir al menos un compañero o tildar "Ninguno" para seguir.'
+            : "Tenés que elegir al menos una opción para seguir.";
+          setError(msg);
+          return;
+        }
+        clearError();
         if (esUltima) confirmarFinalizar();
-        else { estado.indiceAdicional++; persist(); render(); }
+        else irAdelante(arr);
       },
     }, esUltima ? "Finalizar y enviar" : "Siguiente"));
     cont.appendChild(navBtns);
@@ -599,21 +622,10 @@
     cont.appendChild(wrap);
 
     const navBtns = el("div", { class: "flex-row mt-16", style: "justify-content:center" });
-    if (estado.indiceAdicional > 0) {
-      navBtns.appendChild(el("button", {
-        class: "btn btn-gray",
-        onclick: () => { estado.indiceAdicional--; persist(); render(); },
-      }, "Atrás"));
-    } else {
-      navBtns.appendChild(el("button", {
-        class: "btn btn-gray",
-        onclick: () => {
-          estado.step = "afinidad";
-          estado.indiceCompanero = Math.max(0, companeros.length - 1);
-          persist(); render();
-        },
-      }, "Atrás"));
-    }
+    navBtns.appendChild(el("button", {
+      class: "btn btn-gray",
+      onclick: () => irAtras(arr),
+    }, "Atrás"));
     const esUltima = estado.indiceAdicional >= arr.length - 1;
     navBtns.appendChild(el("button", {
       class: "btn",
@@ -624,7 +636,7 @@
           return;
         }
         if (esUltima) confirmarFinalizar();
-        else { estado.indiceAdicional++; persist(); render(); }
+        else irAdelante(arr);
       },
     }, esUltima ? "Finalizar y enviar" : "Siguiente"));
     cont.appendChild(navBtns);

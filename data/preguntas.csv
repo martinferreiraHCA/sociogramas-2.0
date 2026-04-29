@@ -7,7 +7,7 @@ numero,texto,tipo,meta
 6,"Si tuvieras que elegir solo una persona de las anteriores, ¿con quién preferirías trabajar?",SELECCION_COMPANEROS,desde=5;max=1
 7,"¿Con quién creés que podrías trabajar bien aunque todavía no lo hayas hecho mucho? Podés elegir hasta 3.",SELECCION_COMPANEROS,max=3
 8,"¿Quiénes ayudan a que el grupo funcione bien? Pensá en compañeros/as que proponen ideas, organizan el trabajo, resuelven problemas o ayudan a otros/as a seguir.",SELECCION_COMPANEROS,
-9,¿Quiénes te hacen sentir parte del grupo cuando trabajan juntos/as?,SELECCION_COMPANEROS,
+9,"¿Quiénes te hacen sentir parte del grupo cuando trabajan juntos/as? (Pensá en compañeros/as que escuchan tus ideas, te respetan, te apoyan o te integran.)",SELECCION_COMPANEROS,
 10,"¿Quiénes suelen tomar el rol de líder cuando trabajan en grupo? (Puede ser porque organizan, deciden, motivan o guían al grupo.)",SELECCION_COMPANEROS,
 11,¿Hay compañeros/as a quienes les cuesta integrarse cuando se arman grupos?,SI_NO,
 12,"¿Quiénes? Marcá si observaste eso con alguno/a de tus compañeros/as.",SELECCION_COMPANEROS,requiere=11=Si
