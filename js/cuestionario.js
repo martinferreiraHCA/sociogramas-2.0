@@ -24,6 +24,27 @@
     return;
   }
 
+  // Descripciones que se muestran sobre cada card de afinidad. Igualan la
+  // explicación que el alumno vio en la pantalla de instrucciones.
+  const AFINIDAD_DESC = {
+    verde: {
+      short: "Se trabaja muy bien con este/a compañero/a",
+      long: "Esta persona participa, escucha, propone ideas, cumple con las tareas, ayuda a otros y respeta los tiempos y espacios del grupo. Con ella el trabajo fluye, se avanza y es más fácil ponerse de acuerdo. Te sentís cómodo/a, incluido/a y hay respeto.",
+    },
+    amarillo: {
+      short: "A veces se trabaja bien, otras no",
+      long: "Hay días o tareas en las que trabajar con esta persona funciona bien, pero otras veces se distrae, interrumpe o no cumple. Tal vez se pone las pilas si el grupo lo motiva, pero también puede hablar más de lo que trabaja, o dejar las cosas a medias. A veces te resulta fácil, otras veces, frustrante.",
+    },
+    rojo: {
+      short: "Me resulta muy difícil trabajar con este/a compañero/a",
+      long: "Esta persona interrumpe, se queja sin ayudar, no cumple con las tareas, o incluso maltrata, critica sin aportar o ignora al grupo. Puede generar conflictos, desconcentración o tensión. Sentís que trabajar con ella te hace más difícil aprender o avanzar.",
+    },
+    blanco: {
+      short: "No tengo suficiente experiencia trabajando juntos/as",
+      long: "No trabajaste con esta persona en ningún grupo, o fue tan poco que no podés opinar con certeza. Tal vez te llevás bien o mal, pero no tuviste experiencia real trabajando juntos/as.",
+    },
+  };
+
   // Estado cargado desde los CSVs.
   let estudiante = null;
   let companeros = [];
@@ -202,23 +223,34 @@
       centro.appendChild(el("div", { class: "cuestionario-nombre-estudiante" }, compa.nombre));
     }
 
-    const selectorWrap = el("div", { class: "cuestionario-opciones-container" });
-    const select = el("select", { class: "cuestionario-select" });
-    select.appendChild(el("option", { value: "" }, "Seleccioná una opción"));
+    const selectorWrap = el("div", { class: "afi-cards" });
     ops.forEach(op => {
       const c = U.colorOpcionAfinidad(op.texto);
-      const o = el("option", { value: String(op.orden), class: c.cls }, `${c.icon} ${op.texto}`);
-      if (op.orden === dato.opcionOrden) o.selected = true;
-      select.appendChild(o);
+      const desc = AFINIDAD_DESC[c.key] || { short: op.texto, long: "" };
+      const seleccionada = op.orden === dato.opcionOrden;
+      const card = el("button", {
+        type: "button",
+        class: `afi-card afi-card-${c.key || "neutro"}` + (seleccionada ? " selected" : ""),
+        "aria-pressed": seleccionada ? "true" : "false",
+      });
+      card.innerHTML = `
+        <div class="afi-head">
+          <span class="afi-icon">${c.icon}</span>
+          <span class="afi-label">${U.escapeHtml(op.texto.toUpperCase())}</span>
+          <span class="afi-short">${U.escapeHtml(desc.short)}</span>
+          <span class="afi-check">✓</span>
+        </div>
+        ${desc.long ? `<div class="afi-desc">${desc.long}</div>` : ""}
+      `;
+      card.addEventListener("click", () => {
+        dato.opcionOrden = op.orden;
+        dato.sub = {};
+        dato.otroTexto = "";
+        estado.afinidad[compa.codigo] = dato;
+        persist(); render();
+      });
+      selectorWrap.appendChild(card);
     });
-    select.addEventListener("change", () => {
-      dato.opcionOrden = select.value ? parseInt(select.value, 10) : null;
-      dato.sub = {};
-      dato.otroTexto = "";
-      estado.afinidad[compa.codigo] = dato;
-      persist(); render();
-    });
-    selectorWrap.appendChild(select);
     centro.appendChild(selectorWrap);
 
     // Sub-pregunta según flujo
