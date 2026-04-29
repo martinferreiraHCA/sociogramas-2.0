@@ -12,16 +12,34 @@ numero_pregunta,orden,texto
 2,7,Se mantiene tranquilo/a y respeta a todos
 2,8,Motiva a los demás a seguir o concentrarse
 2,9,Deja participar a todos sin imponerse
-2,10,Otro motivo
+2,10,A veces domina demasiado pero igual trabajamos bien
+2,11,Otro motivo
 3,1,Hace lo que le toca solo si se lo dicen
 3,2,Se dispersa mucho
 3,3,Le cuesta tomar decisiones o hablar en grupo
 3,4,Depende de su humor o del día
-3,5,A veces domina demasiado pero igual trabajamos bien
-3,6,Otro motivo
-4,1,No cumple con lo que le toca
-4,2,Interrumpe o desconcentra
-4,3,No respeta opiniones ajenas
-4,4,Genera conflictos
-4,5,No participa
-4,6,Otro motivo
+3,5,"Conmigo bien, pero con otros discute"
+3,6,Propone cosas pero no las organiza bien
+3,7,Se distrae fácil
+3,8,Habla más que trabaja
+3,9,"A veces cumple, otras no"
+3,10,A veces impone su idea
+3,11,Otro motivo
+4,1,No hace nada / Ignora las tareas del grupo
+4,2,Nunca responde los mensajes del grupo
+4,3,Critica sin ayudar
+4,4,No escucha a nadie
+4,5,Siempre discute
+4,6,Genera conflictos o peleas
+4,7,Me hace sentir incómodo/a
+4,8,Interrumpe o no respeta
+4,9,Impone su opinión
+4,10,Nunca puede juntarse y no propone alternativas
+4,11,Otro motivo
+5,99,[BLOQ]Ninguno/a en particular
+6,99,[BLOQ]Me da igual
+7,98,[BLOQ]No se me ocurre nadie en particular
+7,99,[BLOQ]Prefiero trabajar con personas que ya conozco
+8,99,[BLOQ]Ninguno
+11,1,Si
+11,2,No
