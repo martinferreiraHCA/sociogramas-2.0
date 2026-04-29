@@ -112,7 +112,7 @@
       <div style="margin-top:12px;line-height:1.5">
         <p class="mb-12">✅ La información es confidencial y solo será leída por tu referente.</p>
         <p class="mb-12">🎯 El objetivo es armar grupos de trabajo donde todos se sientan cómodos, puedan colaborar, aprender y participar.</p>
-        <p class="mb-12">✋ No estamos preguntando si te llevás bien o mal con alguien, ni si son amigos. Respondé según tu experiencia real al trabajar en grupo.</p>
+        <p class="mb-12">✋ <b>No estamos preguntando si te llevás bien o mal con alguien, ni si son amigos.</b> Respondé según tu experiencia real al trabajar en grupo.</p>
         <h3 class="mb-12 mt-24">Cómo completar la encuesta</h3>
         <p class="mb-12">🟩 <b>VERDE</b> – Me gusta trabajar con esta persona</p>
         <p class="mb-12">🟨 <b>AMARILLO</b> – A veces sí, a veces no</p>
@@ -256,10 +256,22 @@
       return;
     }
     const preg = preguntasAfinidad()[0];
+    const opsAfi = opcionesPorNumero[preg.numero] || [];
+    const opElegida = opsAfi.find(o => o.orden === dato.opcionOrden);
+    const colorElegido = opElegida ? U.colorOpcionAfinidad(opElegida.texto).key : "";
     const siguiente = flujoPorPreguntaYOrden[`${preg.numero}|${dato.opcionOrden}`];
     if (siguiente) {
       const pSub = preguntaPorNumero[siguiente];
       const subOps = opcionesPorNumero[pSub.numero] || [];
+      const algunaMarcada = subOps.some(o => dato.sub[o.orden]);
+      // Para verde / amarillo / rojo es obligatorio marcar al menos un motivo.
+      // El blanco se puede pasar sin marcar nada (acabás de decir que no hay
+      // experiencia suficiente para opinar).
+      if (!algunaMarcada && colorElegido !== "blanco") {
+        errEl.textContent = "Marcá al menos una opción para poder continuar.";
+        errEl.classList.remove("hidden");
+        return;
+      }
       const otraMarcada = subOps.find(o => /otro motivo/i.test(o.texto) && dato.sub[o.orden]);
       if (otraMarcada && !(dato.otroTexto || "").trim()) {
         errEl.textContent = "Especificá el motivo si seleccionaste 'Otro motivo'.";
