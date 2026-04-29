@@ -1,12 +1,27 @@
 // Dashboard del docente sobre CSVs + Google Sheet.
-// Requiere admin_pw en sessionStorage (lo setea admin-login.html).
+// Requiere admin_id_token en sessionStorage (lo setea admin-login.html con
+// Google Sign-In limitado al dominio configurado).
 
 (function () {
   const $ = U.$, el = U.el;
   const root = $("#dashboard-root");
 
-  const pw = sessionStorage.getItem("admin_pw");
-  if (!pw) { window.location.href = "./admin-login.html"; return; }
+  const adminEmail = sessionStorage.getItem("admin_email") || "";
+  const adminName  = sessionStorage.getItem("admin_name")  || adminEmail;
+  const adminExp   = parseInt(sessionStorage.getItem("admin_exp") || "0", 10);
+  const idToken    = sessionStorage.getItem("admin_id_token");
+  // Variable `pw` mantenida por compatibilidad con todas las llamadas internas
+  // que pasan el credential como primer arg. Ahora contiene el id_token.
+  const pw = idToken;
+
+  function logoutYRedirigir(motivo) {
+    ["admin_id_token","admin_email","admin_name","admin_picture","admin_exp","admin_pw"]
+      .forEach(k => sessionStorage.removeItem(k));
+    if (motivo) sessionStorage.setItem("login_motivo", motivo);
+    window.location.replace("./admin-login.html");
+  }
+  if (!idToken) { logoutYRedirigir(); return; }
+  if (adminExp && adminExp * 1000 < Date.now()) { logoutYRedirigir("sesion_expirada"); return; }
 
   // Datos cargados una vez al inicio.
   let estudiantes = [];      // [{codigo, nombre, clase}]
@@ -68,8 +83,8 @@
     ]);
     if (!ests || !ests.ok || !resp || !resp.ok) {
       console.error("init: respuesta inválida de Apps Script", { ests, resp });
-      sessionStorage.removeItem("admin_pw");
-      window.location.href = "./admin-login.html";
+      const e = (ests && ests.error) || (resp && resp.error);
+      logoutYRedirigir(e === "unauthorized" ? "sesion_invalida" : null);
       return;
     }
     estudiantes = ests.data || [];
@@ -181,14 +196,17 @@
     const h = el("div", { class: "panel-container" });
     const sel = `
       <div class="flex-row" style="justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <h2 style="color:#4CAF50;margin:0">Dashboard ${claseSel ? "· " + U.escapeHtml(claseSel) : ""}</h2>
+        <div>
+          <h2 style="color:#4CAF50;margin:0">Dashboard ${claseSel ? "· " + U.escapeHtml(claseSel) : ""}</h2>
+          ${adminEmail ? `<div class="muted" style="font-size:0.8em">Logueado como <b>${U.escapeHtml(adminEmail)}</b></div>` : ""}
+        </div>
         <div class="flex-row" style="gap:8px">
           ${clases.length ? `<select id="sel-clase" class="cuestionario-select" style="max-width:180px">
               <option value="">— Cambiar clase —</option>
               ${clases.map(c => `<option value="${U.escapeHtml(c)}" ${c===claseSel?"selected":""}>${U.escapeHtml(c)}</option>`).join("")}
             </select>` : ""}
           <button class="btn btn-gray btn-sm" id="btn-guia" title="¿Qué significa cada métrica?">📖 Guía</button>
-          <button class="btn btn-gray btn-sm" id="btn-diag" title="Verificar la password contra el Apps Script">🔐 Diagnóstico</button>
+          <button class="btn btn-gray btn-sm" id="btn-diag" title="Verificar el id_token contra el Apps Script">🔐 Diagnóstico</button>
           <button class="btn btn-gray btn-sm" id="btn-refrescar">Actualizar</button>
           <button class="btn btn-gray btn-sm" id="btn-logout">Salir</button>
         </div>
@@ -208,10 +226,7 @@
       // clase recién seleccionada.
       if (claseSel) await init(); else render();
     });
-    h.querySelector("#btn-logout").addEventListener("click", () => {
-      sessionStorage.removeItem("admin_pw");
-      window.location.href = "./admin-login.html";
-    });
+    h.querySelector("#btn-logout").addEventListener("click", () => logoutYRedirigir());
     h.querySelector("#btn-refrescar").addEventListener("click", async () => {
       U.toast("Actualizando…", "info");
       API.clearCache();
@@ -784,7 +799,8 @@
 
   // Traduce errores del backend a mensajes amigables.
   const ERRORES_HUMANOS = {
-    forbidden: "Contraseña rechazada por el Apps Script. ¿La admin password del Code.gs coincide con la que usaste al entrar?",
+    unauthorized: "El Apps Script rechazó el id_token. Probá Salir y volvé a entrar — la sesión de Google puede haber expirado o no es del dominio @hca.edu.uy.",
+    forbidden: "El Apps Script rechazó la credencial (legacy). Probá Salir y volvé a entrar.",
     accion_desconocida: "El Apps Script todavía corre el código viejo. Hay que redeployar una Versión nueva desde 'Administrar implementaciones'.",
     nombre_reservado: "El nombre del tab no puede ser 'respuestas', 'completados' ni 'grupos'.",
     clase_existe: "Ya existe un tab con ese nombre en la planilla.",
@@ -870,7 +886,7 @@
           s.err(explicarError(r));
           console.error(`importar_estudiantes "${plan.tab}" falló:`, r);
           // Si es un forbidden, tiramos el diagnóstico de auth una sola vez.
-          if (r && r.error === "forbidden" && !diagEjecutado) {
+          if (r && (r.error === "unauthorized" || r.error === "forbidden") && !diagEjecutado) {
             diagEjecutado = true;
             const sDiag = nuevoPaso("Diagnosticando la password", "comparando browser ↔ Apps Script");
             try {
@@ -985,27 +1001,29 @@
       const r = await API.debugAuth(pw);
       console.group("🔐 Diagnóstico de autenticación");
       console.log("match:", r.match);
-      console.log("browser (sessionStorage) length:", r.sent_length, "preview:", r.sent_preview);
-      console.log("Apps Script CONFIG.ADMIN_PASSWORD length:", r.expected_length, "preview:", r.expected_preview);
-      console.log("Primer índice donde difieren:", r.first_diff_index);
-      console.log("char-codes browser:", r.sent_charcodes);
-      console.log("char-codes Code.gs :", r.expected_charcodes);
+      console.log("email recibido:", r.email);
+      console.log("dominio esperado:", r.domain_expected, "→ ok:", r.domain_ok);
+      console.log("audience recibido:", r.aud_received);
+      console.log("audience esperado:", r.aud_expected, "→ ok:", r.audience_ok);
+      console.log("email verificado:", r.email_verified);
+      console.log("expira:", r.expira);
+      if (r.reason) console.log("motivo:", r.reason);
       console.groupEnd();
       if (r.match) {
-        U.toast("✅ Las passwords coinciden. El problema no es de auth.", "success");
-      } else {
-        const diagnostico = r.sent_length !== r.expected_length
-          ? `Distinta longitud (browser=${r.sent_length}, Code.gs=${r.expected_length}) · probablemente hay un espacio o salto de línea al final de alguna`
-          : `Mismo largo pero difieren en el índice ${r.first_diff_index} · mirá los char-codes en la consola`;
-        alert(
-          "❌ Las passwords NO coinciden.\n\n" + diagnostico +
-          "\n\nSolución habitual:\n" +
-          "  1. Cerrá sesión (botón Salir) y volvé a entrar escribiendo la password de nuevo.\n" +
-          "  2. Abrí el Apps Script y verificá CONFIG.ADMIN_PASSWORD (que no haya espacios/tabs al final).\n" +
-          "  3. Redeployá una versión nueva.\n\n" +
-          "El detalle técnico está en la consola."
-        );
+        U.toast(`✅ Sesión válida (${r.email}). El problema no es de auth.`, "success");
+        return;
       }
+      const motivos = [];
+      if (r.reason === "sin_id_token") motivos.push("No hay id_token en el sessionStorage. Volvé a hacer Sign-In.");
+      if (r.reason === "tokeninfo_falló") motivos.push("Google rechazó el token (probablemente expiró). Cerrá sesión y entrá de nuevo.");
+      if (r.audience_ok === false) motivos.push(`El Client ID no coincide. El frontend usa ${r.aud_expected || "?"} y el Code.gs espera ${r.aud_received || "?"}.`);
+      if (r.domain_ok === false) motivos.push(`El email "${r.email}" no es del dominio @${r.domain_expected}.`);
+      if (r.email_verified === false) motivos.push("Google reporta que el email no está verificado.");
+      alert(
+        "❌ La sesión NO está autorizada.\n\n" +
+        (motivos.length ? motivos.map(x => "• " + x).join("\n") : "Mirá la consola para el detalle.") +
+        "\n\nSugerencia: tocá Salir y volvé a entrar."
+      );
     } catch (err) {
       console.error("debug_auth red:", err);
       U.toast("No se pudo contactar al Apps Script: " + (err.message || err), "error");

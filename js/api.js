@@ -101,55 +101,58 @@
     });
   }
 
-  async function adminCheck(pw) { return await getJSON("admin_check", { pw }); }
-  async function fetchRespuestas(pw)  { return await getJSON("respuestas", { pw }); }
-  async function fetchCompletados(pw) { return await getJSON("completados", { pw }); }
-  async function fetchGrupos(pw, clase) {
-    const p = { pw };
+  async function adminCheck(idToken)      { return await getJSON("admin_check", { id_token: idToken }); }
+  async function fetchRespuestas(idToken) { return await getJSON("respuestas", { id_token: idToken }); }
+  async function fetchCompletados(idToken){ return await getJSON("completados", { id_token: idToken }); }
+  async function fetchGrupos(idToken, clase) {
+    const p = { id_token: idToken };
     if (clase) p.clase = clase;
     return await getJSON("grupos", p);
   }
-  async function fetchClases(pw) { return await getJSON("clases", { pw }); }
-  async function fetchEstudiantes(pw, clase) {
-    const p = { pw };
+  async function fetchClases(idToken) { return await getJSON("clases", { id_token: idToken }); }
+  async function fetchEstudiantes(idToken, clase) {
+    const p = { id_token: idToken };
     if (clase) p.clase = clase;
     return await getJSON("estudiantes", p);
   }
 
-  async function saveGrupos(pw, clase, grupos) {
-    return await postJSON({ action: "save_grupos", token_admin: pw, clase, grupos });
+  async function saveGrupos(idToken, clase, grupos) {
+    return await postJSON({ action: "save_grupos", id_token: idToken, clase, grupos });
   }
-  async function crearClase(pw, clase, nombres) {
-    return await postJSON({ action: "crear_clase", token_admin: pw, clase, nombres: nombres || [] });
+  async function crearClase(idToken, clase, nombres) {
+    return await postJSON({ action: "crear_clase", id_token: idToken, clase, nombres: nombres || [] });
   }
-  async function agregarEstudiante(pw, clase, nombre) {
-    return await postJSON({ action: "agregar_estudiante", token_admin: pw, clase, nombre });
+  async function agregarEstudiante(idToken, clase, nombre) {
+    return await postJSON({ action: "agregar_estudiante", id_token: idToken, clase, nombre });
   }
-  async function generarCodigos(pw, clase) {
-    return await postJSON({ action: "generar_codigos", token_admin: pw, clase });
+  async function generarCodigos(idToken, clase) {
+    return await postJSON({ action: "generar_codigos", id_token: idToken, clase });
   }
-  async function eliminarEstudiante(pw, clase, codigo) {
-    return await postJSON({ action: "eliminar_estudiante", token_admin: pw, clase, codigo });
+  async function eliminarEstudiante(idToken, clase, codigo) {
+    return await postJSON({ action: "eliminar_estudiante", id_token: idToken, clase, codigo });
   }
-  async function importarEstudiantes(pw, clase, estudiantes, modo) {
+  async function importarEstudiantes(idToken, clase, estudiantes, modo) {
     return await postJSON({
       action: "importar_estudiantes",
-      token_admin: pw,
+      id_token: idToken,
       clase,
       estudiantes: estudiantes || [],
       modo: modo || "merge",
     });
   }
-  async function debugAuth(pw) {
-    return await postJSON({ action: "debug_auth", token_admin: pw });
+  async function debugAuth(idToken) {
+    return await postJSON({ action: "debug_auth", id_token: idToken });
   }
 
   // ---- Helpers HTTP ----
   // Enmascara credenciales para no imprimirlas en consola.
   function redact(body) {
     const out = Object.assign({}, body || {});
-    ["token", "token_admin", "pw"].forEach(k => {
-      if (out[k]) out[k] = "***" + String(out[k]).slice(-2);
+    ["token", "token_admin", "pw", "id_token"].forEach(k => {
+      if (out[k]) {
+        const v = String(out[k]);
+        out[k] = v.length > 20 ? v.slice(0, 6) + "...(" + v.length + " chars)" : "***" + v.slice(-2);
+      }
     });
     return out;
   }

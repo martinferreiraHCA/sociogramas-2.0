@@ -10,38 +10,86 @@
 <body>
   <div class="login">
     <h2>Acceso administrador</h2>
-    <form id="form-admin">
-      <label for="pw">Contraseña</label>
-      <input id="pw" type="password" required autocomplete="current-password" />
-      <button type="submit" class="btn" id="btn-entrar">Entrar</button>
-    </form>
+    <p class="muted" style="margin-top:-6px;margin-bottom:18px">
+      Sólo cuentas <b id="dom-label">@hca.edu.uy</b>. Iniciá sesión con tu cuenta institucional.
+    </p>
+
+    <div id="g-button-wrap" style="display:flex;justify-content:center;margin-bottom:14px;min-height:40px"></div>
+
+    <p id="login-error" class="cuestionario-error hidden" style="text-align:left"></p>
+
     <a href="./index.html" class="login-link">Volver al ingreso de estudiante</a>
   </div>
 
   <script src="./js/config.js"></script>
   <script src="./js/utils.js"></script>
   <script src="./js/api.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script>
-    document.getElementById("form-admin").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const pw = document.getElementById("pw").value;
-      const btn = document.getElementById("btn-entrar");
-      btn.disabled = true; btn.textContent = "Verificando…";
+    const cfg = window.APP_CONFIG || {};
+    const dom = (cfg.ADMIN_DOMAIN || "").toLowerCase();
+    document.getElementById("dom-label").textContent = "@" + dom;
+
+    const errEl = document.getElementById("login-error");
+    function showError(msg) {
+      errEl.textContent = msg;
+      errEl.classList.remove("hidden");
+    }
+
+    if (!cfg.GOOGLE_CLIENT_ID || cfg.GOOGLE_CLIENT_ID.includes("PEGAR_")) {
+      showError("Falta configurar GOOGLE_CLIENT_ID en js/config.js.");
+    }
+
+    function decodeJwt(token) {
       try {
-        const r = await API.adminCheck(pw);
-        if (r && r.ok) {
-          sessionStorage.setItem("admin_pw", pw);
-          window.location.href = "./dashboard.html";
-        } else {
-          U.toast("Contraseña incorrecta", "error");
-        }
-      } catch (err) {
-        console.error(err);
-        U.toast("Error verificando la contraseña", "error");
-      } finally {
-        btn.disabled = false; btn.textContent = "Entrar";
+        const parts = token.split(".");
+        return JSON.parse(decodeURIComponent(escape(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))));
+      } catch (e) { return null; }
+    }
+
+    function onGoogleSignIn(response) {
+      const idToken = response && response.credential;
+      if (!idToken) { showError("Google no devolvió un id_token."); return; }
+      const payload = decodeJwt(idToken);
+      if (!payload) { showError("No se pudo leer el id_token."); return; }
+      const email = String(payload.email || "").toLowerCase();
+      if (!email.endsWith("@" + dom)) {
+        showError(`Esa cuenta (${U.escapeHtml(email)}) no es del dominio @${dom}.`);
+        return;
       }
-    });
+      sessionStorage.setItem("admin_id_token", idToken);
+      sessionStorage.setItem("admin_email", email);
+      sessionStorage.setItem("admin_name", payload.name || email);
+      sessionStorage.setItem("admin_picture", payload.picture || "");
+      sessionStorage.setItem("admin_exp", String(payload.exp || 0));
+      window.location.href = "./dashboard.html";
+    }
+
+    // Inicializar Google Identity Services una vez que cargue el script.
+    function tryInit() {
+      if (!window.google || !google.accounts || !google.accounts.id) {
+        return setTimeout(tryInit, 80);
+      }
+      if (!cfg.GOOGLE_CLIENT_ID) return;
+      try {
+        google.accounts.id.initialize({
+          client_id: cfg.GOOGLE_CLIENT_ID,
+          callback: onGoogleSignIn,
+          hd: dom,                  // hint a Google: pre-filtrá por dominio
+          auto_select: false,
+          ux_mode: "popup",
+          cancel_on_tap_outside: true,
+        });
+        google.accounts.id.renderButton(
+          document.getElementById("g-button-wrap"),
+          { theme: "outline", size: "large", text: "signin_with", shape: "rectangular", width: 280 }
+        );
+      } catch (e) {
+        console.error("Google Sign-In init falló:", e);
+        showError("Error iniciando Google Sign-In: " + e.message);
+      }
+    }
+    tryInit();
   </script>
 </body>
 </html>
