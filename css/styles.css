@@ -1223,3 +1223,33 @@ table.data-table tbody tr:hover { background: #fafafa; }
 .cuestionario-estudiantes-container.disabled label {
   cursor: not-allowed;
 }
+
+/* ---------- Pregunta Sí / No ---------- */
+.cuest-sino-wrap {
+  display: flex; gap: 14px; justify-content: center;
+  margin: 24px auto;
+  flex-wrap: wrap;
+}
+.cuest-sino-btn {
+  background: #fff;
+  border: 2px solid #ccc;
+  border-radius: 14px;
+  padding: 22px 48px;
+  font-size: 1.4em;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 160px;
+  transition: all 0.18s ease;
+  color: #333;
+}
+.cuest-sino-btn:hover {
+  border-color: #4CAF50;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+}
+.cuest-sino-btn.selected {
+  background: linear-gradient(135deg, #66bb6a, #2e7d32);
+  border-color: #2e7d32;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(46,125,50,0.3);
+}

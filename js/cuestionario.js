@@ -313,22 +313,50 @@
 
   // ---------- Pantalla 3: preguntas adicionales (SELECCION_COMPANEROS) ----------
   function preguntasAdicionales() {
-    return preguntas.filter(p => p.tipo === "SELECCION_COMPANEROS");
+    return preguntas.filter(p =>
+      p.tipo === "SELECCION_COMPANEROS" ||
+      p.tipo === "SI_NO"
+    );
+  }
+
+  // ¿Esta pregunta debería saltarse según el meta `requiere=N=valor`?
+  function debeSaltar(preg) {
+    const meta = parseMeta(preg.meta);
+    if (!meta.requiere) return false;
+    const partes = meta.requiere.split("=");
+    if (partes.length < 2) return false;
+    const numRef = parseInt(partes[0], 10);
+    const esperado = (partes[1] || "").trim().toLowerCase();
+    const respuesta = String((estado.siNo || {})[numRef] || "").trim().toLowerCase();
+    return respuesta !== esperado;
   }
 
   function renderAdicionales() {
     const arr = preguntasAdicionales();
     if (!arr.length) return submitAll();
+    // Saltar preguntas condicionales que no aplican.
+    while (estado.indiceAdicional < arr.length && debeSaltar(arr[estado.indiceAdicional])) {
+      estado.indiceAdicional++;
+    }
     if (estado.indiceAdicional >= arr.length) return submitAll();
 
     const preg = arr[estado.indiceAdicional];
+    if (preg.tipo === "SI_NO") return renderAdicionalSiNo(preg, arr);
+
     const seleccionados = estado.adicionales[preg.numero] || [];
     estado.bloqueantes = estado.bloqueantes || {};
     const bloqueantesActivas = estado.bloqueantes[preg.numero] || [];
 
-    // Meta de la pregunta (max=N, etc.)
+    // Meta de la pregunta (max=N, desde=N, etc.)
     const meta = parseMeta(preg.meta);
     const maxN = parseInt(meta.max, 10) || 0;
+    const desdePreg = parseInt(meta.desde, 10) || 0;
+    // Si hay desde=N, mostramos sólo los compañeros que el alumno seleccionó
+    // en la pregunta N (ej: Q7 elige uno solo de los marcados en Q6).
+    const desdeCods = desdePreg ? new Set(estado.adicionales[desdePreg] || []) : null;
+    const companerosFiltrados = desdeCods
+      ? companeros.filter(c => desdeCods.has(c.codigo))
+      : companeros;
 
     // Opciones de la pregunta marcadas como bloqueantes (texto con prefijo
     // "[BLOQ]" en data/opciones.csv).
@@ -344,9 +372,10 @@
     cont.appendChild(el("div", { class: "cuestionario-pregunta-titulo" }, preg.texto));
 
     const wrap = el("div", { class: "cuestionario-estudiantes-lista" });
-    const ayuda = maxN
-      ? `Podés elegir hasta ${maxN} compañero(s).`
-      : "Seleccioná a los compañeros que cumplen con esto (podés elegir varios o ninguno).";
+    let ayuda;
+    if (desdePreg && maxN === 1) ayuda = "Elegí uno (o tildá la opción “Me da igual” si no podés decidir).";
+    else if (maxN) ayuda = `Podés elegir hasta ${maxN} compañero(s).`;
+    else ayuda = "Seleccioná a los compañeros que cumplen con esto (podés elegir varios o ninguno).";
     wrap.appendChild(el("p", { class: "muted mb-12" }, ayuda));
 
     const errEl = el("div", { class: "cuestionario-error hidden", id: "ad-err" });
@@ -415,20 +444,29 @@
 
     // 2. Lista de compañeros (deshabilitada si hay bloqueante activa).
     const list = el("div", { class: "cuestionario-estudiantes-container" + (hayBloqueante ? " disabled" : "") });
-    if (!companeros.length) {
-      list.appendChild(el("p", { class: "muted" }, "No hay compañeros para evaluar."));
+    if (!companerosFiltrados.length) {
+      const msg = desdePreg
+        ? "No marcaste ningún compañero en la pregunta anterior; tildá “Me da igual” para continuar."
+        : "No hay compañeros para evaluar.";
+      list.appendChild(el("p", { class: "muted" }, msg));
     } else {
-      companeros.forEach(c => {
+      companerosFiltrados.forEach(c => {
         const item = el("div", { class: "cuestionario-estudiante-item" });
         const cb = el("input", {
-          type: "checkbox",
+          type: maxN === 1 ? "radio" : "checkbox",
           class: "cuestionario-estudiante-checkbox",
+          name: "ad-" + preg.numero,
           id: "ad-" + c.codigo,
         });
         cb.checked = seleccionados.includes(c.codigo);
         cb.disabled = hayBloqueante;
         cb.addEventListener("change", () => {
-          if (!setPeer(c.codigo, cb.checked)) cb.checked = !cb.checked;
+          if (maxN === 1) {
+            // Radio: limpiar y setear este.
+            estado.adicionales[preg.numero] = [];
+            const ok = setPeer(c.codigo, true);
+            if (!ok) cb.checked = false;
+          } else if (!setPeer(c.codigo, cb.checked)) cb.checked = !cb.checked;
         });
         const lbl = el("label", {
           for: "ad-" + c.codigo,
@@ -481,6 +519,67 @@
       if (k) out[k] = (v == null ? "" : v);
     });
     return out;
+  }
+
+  // ---------- Pregunta tipo SI_NO ----------
+  function renderAdicionalSiNo(preg, arr) {
+    estado.siNo = estado.siNo || {};
+    const valor = estado.siNo[preg.numero] || "";
+    const cont = el("div", { class: "panel-container" });
+    cont.appendChild(progressBar(estado.indiceAdicional, arr.length));
+    cont.appendChild(el("div", { class: "cuestionario-pregunta-titulo" }, preg.texto));
+
+    const errEl = el("div", { class: "cuestionario-error hidden text-center" });
+    cont.appendChild(errEl);
+
+    const opciones = (opcionesPorNumero[preg.numero] || []).slice().sort((a,b) => a.orden - b.orden);
+    const wrap = el("div", { class: "cuest-sino-wrap" });
+    opciones.forEach(op => {
+      const seleccionada = valor === op.texto;
+      const btn = el("button", {
+        class: "cuest-sino-btn" + (seleccionada ? " selected" : ""),
+      }, op.texto);
+      btn.addEventListener("click", () => {
+        estado.siNo[preg.numero] = op.texto;
+        persist(); render();
+      });
+      wrap.appendChild(btn);
+    });
+    cont.appendChild(wrap);
+
+    const navBtns = el("div", { class: "flex-row mt-16", style: "justify-content:center" });
+    if (estado.indiceAdicional > 0) {
+      navBtns.appendChild(el("button", {
+        class: "btn btn-gray",
+        onclick: () => { estado.indiceAdicional--; persist(); render(); },
+      }, "Atrás"));
+    } else {
+      navBtns.appendChild(el("button", {
+        class: "btn btn-gray",
+        onclick: () => {
+          estado.step = "afinidad";
+          estado.indiceCompanero = Math.max(0, companeros.length - 1);
+          persist(); render();
+        },
+      }, "Atrás"));
+    }
+    const esUltima = estado.indiceAdicional >= arr.length - 1;
+    navBtns.appendChild(el("button", {
+      class: "btn",
+      onclick: () => {
+        if (!estado.siNo[preg.numero]) {
+          errEl.textContent = "Tenés que elegir Sí o No.";
+          errEl.classList.remove("hidden");
+          return;
+        }
+        if (esUltima) confirmarFinalizar();
+        else { estado.indiceAdicional++; persist(); render(); }
+      },
+    }, esUltima ? "Finalizar y enviar" : "Siguiente"));
+    cont.appendChild(navBtns);
+    cont.appendChild(el("div", { class: "cuestionario-contador text-center" },
+      `Pregunta ${estado.indiceAdicional + 1} de ${arr.length}`));
+    root.appendChild(cont);
   }
 
   function progressBar(i, n) {
@@ -585,6 +684,21 @@
           opcion_texto: op.texto.replace(/^\[BLOQ\]\s*/i, ""),
           otro_texto: "",
         });
+      });
+    });
+
+    // Respuestas SI_NO (Sí/No globales). Cada una se guarda como una fila con
+    // opcion_texto = "Si" | "No" y sin evaluado.
+    Object.entries(estado.siNo || {}).forEach(([numStr, valor]) => {
+      const preg = preguntaPorNumero[parseInt(numStr, 10)];
+      if (!preg || !valor) return;
+      respuestas.push({
+        numero_pregunta: preg.numero,
+        texto_pregunta: preg.texto,
+        evaluado_codigo: "",
+        evaluado_nombre: "",
+        opcion_texto: valor,
+        otro_texto: "",
       });
     });
 

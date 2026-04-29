@@ -37,6 +37,9 @@ numero_pregunta,orden,texto
 4,10,Nunca puede juntarse y no propone alternativas
 4,11,Otro motivo
 5,99,[BLOQ]Ninguno/a en particular
-6,98,[BLOQ]No se me ocurre nadie en particular
-6,99,[BLOQ]Prefiero trabajar con personas que ya conozco
-7,99,[BLOQ]Ninguno
+6,99,[BLOQ]Me da igual
+7,98,[BLOQ]No se me ocurre nadie en particular
+7,99,[BLOQ]Prefiero trabajar con personas que ya conozco
+8,99,[BLOQ]Ninguno
+11,1,Si
+11,2,No
