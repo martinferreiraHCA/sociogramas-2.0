@@ -16,6 +16,6 @@
 window.APP_CONFIG = {
   APPS_SCRIPT_URL:   "https://script.google.com/macros/s/AKfycbwJlwMytUFEnAF6M-hvkMRsamdxJdzTh0IL6lwSd4Ji49wXy814vSQU8yBD9KmN66lbow/exec",
   APPS_SCRIPT_TOKEN: "d7d1e6cb97cca059ffcdd126d5f4132a76e99442382f29cf",
-  GOOGLE_CLIENT_ID:  "263672487463-2ov3t4ah22caehpnbri341kaiud3n6u3.apps.googleusercontent.com",
+  GOOGLE_CLIENT_ID:  "1096411533432-sdaj35tq8q0gvq0sir5k008ru59b6sfa.apps.googleusercontent.com",
   ADMIN_DOMAIN:      "hca.edu.uy",
 };
