@@ -384,9 +384,17 @@
 
   // Navegación con salto bidireccional sobre preguntas condicionales.
   function avanzarIndice(arr, delta) {
-    let idx = estado.indiceAdicional + delta;
-    while (idx >= 0 && idx < arr.length && debeSaltar(arr[idx])) idx += delta;
+    const partida = estado.indiceAdicional;
+    let idx = partida + delta;
+    const saltadas = [];
+    while (idx >= 0 && idx < arr.length && debeSaltar(arr[idx])) {
+      saltadas.push(arr[idx].numero);
+      idx += delta;
+    }
     estado.indiceAdicional = idx;
+    if (saltadas.length) {
+      console.debug(`[cuestionario] desde índice ${partida} → ${idx}; saltadas (preg.numero): ${saltadas.join(", ")} · siNo:`, estado.siNo);
+    }
   }
   function irAtras(arr) {
     avanzarIndice(arr, -1);
