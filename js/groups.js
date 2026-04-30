@@ -52,8 +52,12 @@
 //   }
 
 (function () {
-  // Pesos de afinidad (pregunta 1, directa).
+  // Pesos del algoritmo. Las constantes Q_* se aplican en sentido i→j: si el
+  // alumno i nominó al alumno j en esa pregunta, el lazo dirigido i→j suma
+  // ese peso. Los positivos también acumulan tag[j].recibePositivo (sirve
+  // para detectar populares); los negativos suman tag[j].recibeNegativo.
   const W = {
+    // Pregunta 1 (afinidad por colores).
     VERDE: +3,
     AMARILLO: +1,
     ROJO: -5,
@@ -61,15 +65,24 @@
     // Bonificaciones por reciprocidad.
     MUTUO_POSITIVO: +2,
     MUTUO_NEGATIVO: -5,
-    // Contribuciones de preguntas abiertas (5..10).
-    Q_AYUDA: +1,        // Q5
-    Q_SENTIR_PARTE: +1, // Q6
-    Q_CUESTA: -2,       // Q10
+    // Q5 - ¿Con quiénes te gustaría trabajar?  (deseo explícito de trabajar)
+    Q_DESEA_TRABAJAR: +2,
+    // Q6 - Si tuvieras que elegir uno solo  (primera opción, lazo más fuerte)
+    Q_PRIMERA_OPCION: +4,
+    // Q7 - ¿Con quién creés que podrías trabajar bien aunque no lo hayas
+    //      hecho mucho?  (apertura a nuevos vínculos, max 3)
+    Q_PODRIA_TRABAJAR: +1,
+    // Q8 - ¿Quiénes ayudan a que el grupo funcione?  (refuerzo positivo)
+    Q_AYUDA: +1,
+    // Q9 - ¿Quiénes te hacen sentir parte?  (refuerzo social)
+    Q_SENTIR_PARTE: +1,
+    // Q14 - ¿Con quién te cuesta más trabajar?  (fricción adicional al rojo)
+    Q_CUESTA: -2,
   };
 
   // Umbral para considerar a alguien "líder" / "aislado" / "apoyo".
   // Se expresa como fracción de compañeros de la clase. Si N = 25 y
-  // el umbral es 0.2, 5+ nominaciones en Q7 ya lo marcan como líder.
+  // el umbral es 0.2, 5+ nominaciones en Q10 ya lo marcan como líder.
   const UMBRAL_TAG = 0.2;
 
   function formarGrupos(students, responses, opciones, params) {
@@ -81,6 +94,9 @@
         distribuirApoyo: true,
         estrategia: "automatico",
         prioridad: "evitar_conflictos",
+        // Si está activo, todos los grupos quedan con el mismo tamaño ±1
+        // (no se permite ningún grupo con menos de tamMin ni más de tamMax).
+        tamanoEstricto: true,
       },
       params || {}
     );
@@ -95,7 +111,20 @@
     const score = matriz(N, 0);
     // Tags acumulados por alumno.
     const tag = Array.from({ length: N }, () => ({
-      lider: 0, aislado: 0, apoyo: 0, recibePositivo: 0, recibeNegativo: 0,
+      lider: 0,            // Q8 + Q10
+      aislado: 0,          // Q12 (¿a quién le cuesta integrarse?)
+      apoyo: 0,            // Q13 (¿quién necesita más apoyo?)
+      recibePositivo: 0,
+      recibeNegativo: 0,
+      // Métricas adicionales por pregunta para mostrar en el dashboard.
+      verdesRecibidos: 0,
+      rojosRecibidos: 0,
+      deseado: 0,           // Q5 - cuántos lo quieren en su grupo
+      primeraOpcion: 0,     // Q6 - cuántos lo eligieron como única persona
+      podriaTrabajar: 0,    // Q7 - cuántos lo nominaron como apertura
+      ayuda: 0,             // Q8 - cuántos lo ven como facilitador
+      sentirParte: 0,       // Q9 - cuántos se sienten parte por su presencia
+      cuestaTrabajar: 0,    // Q14 - cuántos dicen que les cuesta trabajar con él/ella
     }));
 
     // Identificar opciones verde/amarillo/rojo/blanco de la pregunta 1.
@@ -117,15 +146,19 @@
       if (q === 1) {
         const c = colorDeOpcion[r.opcion_texto] ||
           (r.opcion_texto ? r.opcion_texto.toLowerCase() : "");
-        if (c === "verde")    { score[i][j] += W.VERDE; tag[j].recibePositivo++; }
-        else if (c === "amarillo") { score[i][j] += W.AMARILLO; }
-        else if (c === "rojo")     { score[i][j] += W.ROJO; tag[j].recibeNegativo++; }
-      } else if (q === 5) { score[i][j] += W.Q_AYUDA; tag[j].recibePositivo++; }
-      else if (q === 6)   { score[i][j] += W.Q_SENTIR_PARTE; tag[j].recibePositivo++; }
-      else if (q === 7)   { tag[j].lider++; }
-      else if (q === 8)   { tag[j].aislado++; }
-      else if (q === 9)   { tag[j].apoyo++; }
-      else if (q === 10)  { score[i][j] += W.Q_CUESTA; tag[j].recibeNegativo++; }
+        if (c === "verde")        { score[i][j] += W.VERDE;    tag[j].recibePositivo++; tag[j].verdesRecibidos++; }
+        else if (c === "amarillo"){ score[i][j] += W.AMARILLO; }
+        else if (c === "rojo")    { score[i][j] += W.ROJO;     tag[j].recibeNegativo++; tag[j].rojosRecibidos++; }
+      }
+      else if (q === 5)  { score[i][j] += W.Q_DESEA_TRABAJAR;  tag[j].recibePositivo++; tag[j].deseado++; }
+      else if (q === 6)  { score[i][j] += W.Q_PRIMERA_OPCION;  tag[j].recibePositivo++; tag[j].primeraOpcion++; }
+      else if (q === 7)  { score[i][j] += W.Q_PODRIA_TRABAJAR; tag[j].recibePositivo++; tag[j].podriaTrabajar++; }
+      else if (q === 8)  { score[i][j] += W.Q_AYUDA;           tag[j].recibePositivo++; tag[j].lider++; tag[j].ayuda++; }
+      else if (q === 9)  { score[i][j] += W.Q_SENTIR_PARTE;    tag[j].recibePositivo++; tag[j].sentirParte++; }
+      else if (q === 10) { tag[j].lider++; }
+      else if (q === 12) { tag[j].aislado++; }
+      else if (q === 13) { tag[j].apoyo++; }
+      else if (q === 14) { score[i][j] += W.Q_CUESTA;          tag[j].recibeNegativo++; tag[j].cuestaTrabajar++; }
     });
 
     // Matriz simétrica de pares (cohesión esperable en un grupo).
@@ -145,8 +178,17 @@
     const esApoyo = (k) => tag[k].apoyo >= thr;
     const esAislado = (k) => tag[k].aislado >= Math.max(1, Math.ceil(thr / 2));
 
-    // --- Fase 2: determinar número de grupos ---
+    // --- Fase 2: determinar número de grupos y rangos de tamaño ---
+    // numGrupos = ceil(N/tamGrupo) si queremos respetar el tamaño "tope",
+    //             round(N/tamGrupo) si queremos que la mayoría tenga
+    //             exactamente ese tamaño. Optamos por el segundo (más
+    //             cercano al pedido del docente).
     const numGrupos = Math.max(1, Math.round(N / P.tamGrupo));
+    const tamMin = Math.floor(N / numGrupos);
+    const tamMax = Math.ceil(N / numGrupos);
+    // Cap superior efectivo durante el greedy (deja flexibilidad si el
+    // docente desactivó la opción estricta).
+    const capInsercion = P.tamanoEstricto ? tamMax : tamMax + 1;
 
     // --- Fase 3: seeds según estrategia ---
     const vulnerabilidad = (k) =>
@@ -171,12 +213,11 @@
     for (let i = 0; i < N; i++) if (!asignado[i]) pendientes.push(i);
     ordenarPendientes(pendientes, pares, P.estrategia, { popularidad, vulnerabilidad });
 
-    const tamMax = P.tamGrupo + 1;
     for (const cand of pendientes) {
       let mejor = -1, mejorScore = -Infinity;
       for (let g = 0; g < grupos.length; g++) {
         const G = grupos[g];
-        if (G.miembros.length >= tamMax) continue;
+        if (G.miembros.length >= capInsercion) continue;
         if (!P.permitirRojoMutuo && violaRojoMutuo(cand, G.miembros, score)) continue;
         const s = scoreInsercion(cand, G.miembros, pares, score, P, {
           esLider, esApoyo, popularidad, tag,
@@ -193,26 +234,77 @@
       grupos[mejor].miembros.push(cand);
     }
 
+    // --- Fase 4.5: balanceo estricto de tamaños ---
+    // Después del greedy puede haber grupos por debajo de tamMin (si nadie
+    // quiso entrar ahí) o por arriba de tamMax. Movemos miembros desde los
+    // sobre-llenos hacia los sub-llenos, eligiendo en el grupo donante al
+    // miembro con peor fit (menor aporte al grupo) y en el grupo receptor
+    // posicionándolo siempre que no rompa el rojo-mutuo.
+    if (P.tamanoEstricto) {
+      let moves = 0, maxMoves = N * 2;
+      while (moves++ < maxMoves) {
+        const sobre = grupos.filter(g => g.miembros.length > tamMax);
+        const sub   = grupos.filter(g => g.miembros.length < tamMin);
+        if (!sobre.length && !sub.length) break;
+        // Si hay grupos por arriba y por debajo, transferir 1 miembro.
+        if (sobre.length && sub.length) {
+          const donador = sobre[0];
+          const receptor = sub[0];
+          const m = peorMiembroParaGrupo(donador.miembros, pares);
+          donador.miembros = donador.miembros.filter(x => x !== m);
+          receptor.miembros.push(m);
+          continue;
+        }
+        // Sólo hay grupos sub-llenos (algún seed quedó casi vacío). Tomamos
+        // del grupo que tenga > tamMin (no excede tamMax) un miembro.
+        if (sub.length) {
+          const donador = grupos
+            .filter(g => g.miembros.length > tamMin)
+            .sort((a, b) => b.miembros.length - a.miembros.length)[0];
+          if (!donador) break;
+          const m = peorMiembroParaGrupo(donador.miembros, pares);
+          donador.miembros = donador.miembros.filter(x => x !== m);
+          sub[0].miembros.push(m);
+          continue;
+        }
+        // Sólo hay grupos sobre-llenos (raro). Mover a otro con margen.
+        if (sobre.length) {
+          const receptor = grupos
+            .filter(g => g.miembros.length < tamMax)
+            .sort((a, b) => a.miembros.length - b.miembros.length)[0];
+          if (!receptor) break;
+          const m = peorMiembroParaGrupo(sobre[0].miembros, pares);
+          sobre[0].miembros = sobre[0].miembros.filter(x => x !== m);
+          receptor.miembros.push(m);
+        }
+      }
+    }
+
     // --- Fase 5: búsqueda local por swaps (Kernighan-Lin simplificado) ---
+    // Buscamos la MEJOR mejora por pasada y la aplicamos una sola vez antes
+    // de re-evaluar. Iterar snapshots stale y aplicar varios swaps en la
+    // misma pasada producía duplicados cuando un mismo miembro entraba a un
+    // grupo y la siguiente iteración intentaba reinserirlo.
     const maxIter = 250;
     for (let it = 0; it < maxIter; it++) {
-      let mejora = false;
+      let mejorDelta = 0.0001, mejorPar = null;
       for (let g1 = 0; g1 < grupos.length; g1++) {
         for (let g2 = g1 + 1; g2 < grupos.length; g2++) {
-          for (const a of grupos[g1].miembros.slice()) {
-            for (const b of grupos[g2].miembros.slice()) {
+          for (const a of grupos[g1].miembros) {
+            for (const b of grupos[g2].miembros) {
               const delta = deltaSwap(a, b, grupos[g1].miembros, grupos[g2].miembros, pares, score, P, {
                 esLider, esApoyo, popularidad, tag,
               });
-              if (delta > 0.0001) {
-                swap(a, b, grupos[g1], grupos[g2]);
-                mejora = true;
+              if (delta > mejorDelta) {
+                mejorDelta = delta;
+                mejorPar = { g1, g2, a, b };
               }
             }
           }
         }
       }
-      if (!mejora) break;
+      if (!mejorPar) break;
+      swap(mejorPar.a, mejorPar.b, grupos[mejorPar.g1], grupos[mejorPar.g2]);
     }
 
     // --- Reporte ---
@@ -251,6 +343,7 @@
       const fitPorMiembro = G.miembros.map((m) => {
         let suma = 0, n = 0;
         G.miembros.forEach((o) => { if (o !== m) { suma += pares[m][o]; n++; } });
+        const t = tag[m];
         return {
           codigo: students[m].codigo,
           nombre: students[m].nombre,
@@ -258,7 +351,16 @@
           lider: esLider(m),
           apoyo: esApoyo(m),
           aislado: esAislado(m),
-          popularidad: tag[m].recibePositivo,
+          popularidad: t.recibePositivo,
+          // Métricas crudas por pregunta (sirven para tooltips en dashboard).
+          verdesRecibidos: t.verdesRecibidos,
+          rojosRecibidos: t.rojosRecibidos,
+          deseado: t.deseado,
+          primeraOpcion: t.primeraOpcion,
+          podriaTrabajar: t.podriaTrabajar,
+          ayuda: t.ayuda,
+          sentirParte: t.sentirParte,
+          cuestaTrabajar: t.cuestaTrabajar,
         };
       }).sort((a, b) => b.fit - a.fit);
 
@@ -299,10 +401,15 @@
         rojosMutuosInternos: rojosMutuos,
         aislados,
         tamanos: gruposOut.map((g) => g.codigos.length),
+        tamGrupoPedido: P.tamGrupo,
+        tamMin, tamMax, numGrupos,
+        // ¿Quedó algún grupo fuera del rango pedido?
+        respetaTamanio: gruposOut.every(g => g.codigos.length >= tamMin && g.codigos.length <= tamMax),
       },
       pares,
       estudiantes: students,
       scoreDirigido: score,
+      tags: tag,    // Métricas crudas por alumno (índice = posición en `students`).
     };
   }
 
@@ -333,6 +440,19 @@
   function esAmbivalente(a, b, score) {
     const sa = score[a][b], sb = score[b][a];
     return (sa > 0 && sa <= 1) || (sb > 0 && sb <= 1);
+  }
+
+  // Devuelve el miembro del grupo cuyo aporte (suma de pares con el resto)
+  // es el más bajo. Sirve para decidir a quién sacar cuando hay que
+  // rebalancear tamaños.
+  function peorMiembroParaGrupo(miembros, pares) {
+    let peor = miembros[0], peorFit = Infinity;
+    for (const m of miembros) {
+      let s = 0;
+      for (const o of miembros) if (o !== m) s += pares[m][o];
+      if (s < peorFit) { peorFit = s; peor = m; }
+    }
+    return peor;
   }
 
   function cohesionGrupo(mbros, pares) {

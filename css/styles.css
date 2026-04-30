@@ -1360,3 +1360,33 @@ table.data-table tbody tr:hover { background: #fafafa; }
   .afi-head { grid-template-columns: 30px auto 1fr 22px; gap: 8px; }
   .afi-short { font-size: 0.82em; }
 }
+
+/* ---------- Insignias del cuestionario en el modal de detalle ---------- */
+.est-insignias {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.est-insignia {
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-left: 4px solid #bdbdbd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.est-insignia-num { font-size: 1.4em; font-weight: 700; color: #333; }
+.est-insignia-icon { font-size: 1.2em; }
+.est-insignia-label { font-size: 0.82em; color: #555; }
+.ins-ok   { border-left-color: #2e7d32; background: #f3fbf4; }
+.ins-ok .est-insignia-num   { color: #2e7d32; }
+.ins-info { border-left-color: #1976d2; background: #f0f6fd; }
+.ins-info .est-insignia-num { color: #1565c0; }
+.ins-warn { border-left-color: #ef6c00; background: #fff8ec; }
+.ins-warn .est-insignia-num { color: #ef6c00; }
+.ins-err  { border-left-color: #c62828; background: #fdeeee; }
+.ins-err .est-insignia-num  { color: #c62828; }
