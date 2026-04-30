@@ -1649,6 +1649,24 @@
     const stats = calcularStatsSociograma(ests, resp);
     const st = stats[codigo];
 
+    // Conteos por pregunta (nominaciones recibidas).
+    const cnt = {};
+    recibidas.forEach(r => {
+      const q = Number(r.numero_pregunta);
+      cnt[q] = (cnt[q] || 0) + 1;
+    });
+    const insignias = [
+      { q: 5,  icon: "🤝", label: "Lo quieren en su grupo",     cls: "ins-ok" },
+      { q: 6,  icon: "⭐", label: "Primera opción",               cls: "ins-ok" },
+      { q: 7,  icon: "🌱", label: "Podrían trabajar bien",        cls: "ins-ok" },
+      { q: 8,  icon: "🛠️", label: "Hace que el grupo funcione",   cls: "ins-ok" },
+      { q: 9,  icon: "🤗", label: "Hace sentir parte",             cls: "ins-ok" },
+      { q: 10, icon: "👑", label: "Referente",                     cls: "ins-info" },
+      { q: 12, icon: "🫥", label: "Le cuesta integrarse",           cls: "ins-warn" },
+      { q: 13, icon: "🤲", label: "Necesita apoyo",                cls: "ins-warn" },
+      { q: 14, icon: "⚡", label: "Les cuesta trabajar con él/ella", cls: "ins-err" },
+    ];
+
     const overlay = el("div", { class: "modal-overlay" });
     const modal = el("div", { class: "modal-card" });
     modal.innerHTML = `
@@ -1674,6 +1692,16 @@
             <div class="muted">Completó</div>
             <div class="est-resumen-val">${dadas.length ? "✅" : "⏳"}</div>
           </div>
+        </div>
+
+        <div class="est-insignias">
+          ${insignias.filter(i => (cnt[i.q] || 0) > 0).map(i => `
+            <div class="est-insignia ${i.cls}">
+              <div class="est-insignia-num">${cnt[i.q]}</div>
+              <div class="est-insignia-icon">${i.icon}</div>
+              <div class="est-insignia-label">${i.label}</div>
+            </div>
+          `).join("") || '<div class="muted" style="grid-column:1/-1;text-align:center;padding:8px">Sin nominaciones todavía en las preguntas Q5-Q14.</div>'}
         </div>
 
         <div class="est-tabs">
