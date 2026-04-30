@@ -233,6 +233,7 @@
     root.appendChild(wrapId("paso-roster", renderRoster(esClase, completadosClase)));
     instalarHookDetalleEst(esClase, resp);
     root.appendChild(wrapId("paso-sociograma", renderSociograma(esClase, resp)));
+    root.appendChild(renderRanking(esClase, resp));
     root.appendChild(wrapId("paso-respuestas", renderDetalle(esClase, resp)));
     root.appendChild(wrapId("paso-grupos", renderGrupos(esClase, resp)));
   }
@@ -1577,6 +1578,89 @@
   }
 
   // ---------- Detalle por estudiante ----------
+  // Panel de "Panorama de la clase": top 5 alumnos por cada métrica del
+  // cuestionario, en barras horizontales clickeables que abren el detalle.
+  function renderRanking(ests, resp) {
+    const c = el("div", { class: "panel-container" });
+    if (!ests.length) { c.appendChild(el("h3", null, "Panorama de la clase")); c.appendChild(el("p", { class: "muted" }, "Sin estudiantes.")); return c; }
+
+    const stats = {};
+    ests.forEach(e => stats[e.codigo] = {
+      codigo: e.codigo, nombre: e.nombre,
+      verde: 0, rojo: 0, primera: 0, deseado: 0, lider: 0, ayuda: 0,
+      sentirParte: 0, apoyo: 0, aislado: 0, cuesta: 0,
+    });
+    resp.forEach(r => {
+      const to = String(r.evaluado_codigo).trim();
+      const s = stats[to];
+      if (!s) return;
+      const q = Number(r.numero_pregunta);
+      if (q === 1) {
+        const k = U.colorOpcionAfinidad(r.opcion_texto).key;
+        if (k === "verde") s.verde++;
+        else if (k === "rojo") s.rojo++;
+      }
+      else if (q === 5)  s.deseado++;
+      else if (q === 6)  s.primera++;
+      else if (q === 8)  s.ayuda++;
+      else if (q === 9)  s.sentirParte++;
+      else if (q === 10) s.lider++;
+      else if (q === 12) s.aislado++;
+      else if (q === 13) s.apoyo++;
+      else if (q === 14) s.cuesta++;
+    });
+
+    const arr = Object.values(stats);
+    const top = (key, n = 5) => arr.slice().sort((a, b) => b[key] - a[key]).filter(s => s[key] > 0).slice(0, n);
+
+    const rankings = [
+      { key: "verde",       title: "🟢 Más elegidos como buenos para trabajar", tone: "rank-ok"   },
+      { key: "primera",     title: "⭐ Primera opción del compañero",            tone: "rank-info" },
+      { key: "deseado",     title: "🤝 Más quieren tenerlos en el grupo",        tone: "rank-ok"   },
+      { key: "lider",       title: "👑 Más nominados como referentes",           tone: "rank-info" },
+      { key: "ayuda",       title: "🛠️ Hacen que el grupo funcione",             tone: "rank-ok"   },
+      { key: "sentirParte", title: "🤗 Hacen sentir parte del grupo",            tone: "rank-ok"   },
+      { key: "rojo",        title: "🔴 Más rojos recibidos",                     tone: "rank-err"  },
+      { key: "cuesta",      title: "⚡ Cuesta más trabajar con ellos",            tone: "rank-err"  },
+      { key: "aislado",     title: "🫥 Les cuesta integrarse según otros",        tone: "rank-warn" },
+      { key: "apoyo",       title: "🤲 Necesitan más apoyo según otros",         tone: "rank-warn" },
+    ];
+
+    c.innerHTML = `
+      <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <h3>📊 Panorama de la clase</h3>
+        <div class="muted" style="font-size:0.85em">Top 5 por cada criterio · click para ver detalle</div>
+      </div>`;
+    const grid = el("div", { class: "ranking-grid mt-16" });
+    rankings.forEach(rk => {
+      const data = top(rk.key);
+      if (!data.length) return;
+      const max = Math.max(...data.map(x => x[rk.key]));
+      const col = el("div", { class: `ranking-col ${rk.tone}` });
+      col.innerHTML = `
+        <div class="ranking-title">${rk.title}</div>
+        ${data.map(s => {
+          const pct = max ? (s[rk.key] / max) * 100 : 0;
+          return `
+            <div class="rank-row" data-codigo="${U.escapeHtml(s.codigo)}" title="Click para ver el detalle de ${U.escapeHtml(s.nombre)}">
+              <div class="rank-name">${U.escapeHtml(s.nombre)}</div>
+              <div class="rank-bar"><div style="width:${pct.toFixed(1)}%"></div></div>
+              <div class="rank-val">${s[rk.key]}</div>
+            </div>`;
+        }).join("")}
+      `;
+      grid.appendChild(col);
+    });
+    c.appendChild(grid);
+    grid.querySelectorAll(".rank-row").forEach(row => {
+      row.addEventListener("click", () => {
+        const cod = row.dataset.codigo;
+        if (cod) abrirDetalleEstudiante(cod, ests, resp);
+      });
+    });
+    return c;
+  }
+
   function renderDetalle(ests, resp) {
     const c = el("div", { class: "panel-container" });
     c.innerHTML = `
@@ -1937,13 +2021,13 @@
     gruposLocal.forEach(g => g.codigos.forEach(co => asignados.add(co)));
     const sinAsignar = ests.filter(e => !asignados.has(e.codigo)).map(e => e.codigo);
 
-    tablero.appendChild(makeGrupoCard({ nombre: "Sin asignar", codigos: sinAsignar, isPool: true }, estIdx, -1));
+    tablero.appendChild(makeGrupoCard({ nombre: "Sin asignar", codigos: sinAsignar, isPool: true }, estIdx, -1, null, ests, resp));
     gruposLocal.forEach((g, i) => {
       // El análisis (líder, relaciones internas, fit) se sincroniza por posición
       // con `resultadoAlgoritmo.grupos[i]`. Si el usuario editó a mano, el análisis
       // puede quedar desactualizado hasta la próxima regeneración.
       const analisis = resultadoAlgoritmo && resultadoAlgoritmo.grupos[i] ? resultadoAlgoritmo.grupos[i] : null;
-      tablero.appendChild(makeGrupoCard(g, estIdx, i, analisis));
+      tablero.appendChild(makeGrupoCard(g, estIdx, i, analisis, ests, resp));
     });
 
     return c;
@@ -2076,7 +2160,76 @@
     if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  function makeGrupoCard(g, estIdx, gruposIndex, analisis) {
+  // Matriz cuadrada con quién evaluó a quién en la pregunta 1, sólo entre
+  // los miembros del grupo. Filas = evaluadores, columnas = evaluados.
+  function renderMatrizGrupo(codigos, ests, resp) {
+    const estIdx = {};
+    ests.forEach(e => estIdx[e.codigo] = e);
+    const codes = codigos.filter(c => estIdx[c]);
+    if (codes.length < 2) return null;
+
+    // color[from][to] = "verde" | "amarillo" | "rojo" | "blanco"
+    const color = {};
+    codes.forEach(c => color[c] = {});
+    const codesSet = new Set(codes);
+    resp.forEach(r => {
+      if (Number(r.numero_pregunta) !== 1) return;
+      const f = String(r.codigo).trim();
+      const t = String(r.evaluado_codigo).trim();
+      if (!codesSet.has(f) || !codesSet.has(t)) return;
+      const k = U.colorOpcionAfinidad(r.opcion_texto).key;
+      if (k) color[f][t] = k;
+    });
+
+    // Resumen agregado de pares.
+    let verdMutuo = 0, verdUni = 0, amar = 0, rojoUni = 0, rojoMutuo = 0;
+    for (let i = 0; i < codes.length; i++) {
+      for (let j = i + 1; j < codes.length; j++) {
+        const a = codes[i], b = codes[j];
+        const ab = color[a][b], ba = color[b][a];
+        if (ab === "rojo" && ba === "rojo") rojoMutuo++;
+        else if (ab === "rojo" || ba === "rojo") rojoUni++;
+        else if (ab === "verde" && ba === "verde") verdMutuo++;
+        else if (ab === "verde" || ba === "verde") verdUni++;
+        else if (ab === "amarillo" || ba === "amarillo") amar++;
+      }
+    }
+
+    const iconoColor = (k) => k === "verde" ? "🟢" : k === "amarillo" ? "🟡" : k === "rojo" ? "🔴" : k === "blanco" ? "⚪" : "";
+    const cellTitle = (from, to, k) => k
+      ? `${estIdx[from].nombre} → ${estIdx[to].nombre}: ${k}`
+      : `${estIdx[from].nombre} no evaluó a ${estIdx[to].nombre}`;
+
+    let html = `<div class="grupo-matriz-wrap"><table class="grupo-matriz">
+      <thead><tr><th></th>${codes.map(c => `<th title="${U.escapeHtml(estIdx[c].nombre)}">${U.escapeHtml(primerNombre(estIdx[c].nombre))}</th>`).join("")}</tr></thead>
+      <tbody>`;
+    codes.forEach(from => {
+      html += `<tr><th title="${U.escapeHtml(estIdx[from].nombre)}">${U.escapeHtml(primerNombre(estIdx[from].nombre))}</th>`;
+      codes.forEach(to => {
+        if (from === to) {
+          html += `<td class="mat-self" title="—">—</td>`;
+        } else {
+          const k = color[from][to];
+          const mutuo = k && color[to][from] && k === color[to][from];
+          html += `<td class="mat-${k || "none"}${mutuo ? " mat-mutuo" : ""}" title="${U.escapeHtml(cellTitle(from, to, k))}">${iconoColor(k)}</td>`;
+        }
+      });
+      html += `</tr>`;
+    });
+    html += `</tbody></table></div>`;
+
+    const partes = [];
+    if (verdMutuo) partes.push(`🟢↔ ${verdMutuo} mutuo${verdMutuo > 1 ? "s" : ""}`);
+    if (verdUni)   partes.push(`🟢→ ${verdUni} unilateral${verdUni > 1 ? "es" : ""}`);
+    if (amar)      partes.push(`🟡 ${amar}`);
+    if (rojoUni)   partes.push(`🔴 ${rojoUni}`);
+    if (rojoMutuo) partes.push(`<b style="color:#c62828">⚠ ${rojoMutuo} rojos mutuos</b>`);
+    html += `<div class="grupo-matriz-resumen">${partes.length ? partes.join(" · ") : "Sin evaluaciones entre estos miembros todavía."}</div>`;
+    html += `<div class="grupo-matriz-leyenda">Cada fila es <b>el evaluador</b>; cada columna, <b>el evaluado</b>. Hovereá una celda para ver el detalle.</div>`;
+    return html;
+  }
+
+  function makeGrupoCard(g, estIdx, gruposIndex, analisis, ests, resp) {
     const warnings = (analisis && analisis.warnings) || [];
     const tieneRojoMutuo = warnings.some(w => w.startsWith("Rojo mutuo"));
     const tieneWarn = warnings.length > 0 && !tieneRojoMutuo;
@@ -2162,6 +2315,20 @@
       body.appendChild(chip);
     });
     card.appendChild(body);
+
+    // Matriz interna del grupo (quién dió qué a quién en la afinidad). Sólo
+    // tiene sentido cuando hay ≥ 2 miembros que respondieron entre sí.
+    if (!g.isPool && ests && resp && g.codigos.length >= 2) {
+      const matrizHTML = renderMatrizGrupo(g.codigos, ests, resp);
+      if (matrizHTML) {
+        const detalles = el("details", { class: "grupo-detalles-dinamica" });
+        detalles.innerHTML = `
+          <summary>🔬 Dinámica interna · quién dijo qué</summary>
+          ${matrizHTML}
+        `;
+        card.appendChild(detalles);
+      }
+    }
 
     if (warnings.length) {
       const w = el("div", { class: "muted mt-16", style: "font-size:0.85em;color:#b26a00" });
