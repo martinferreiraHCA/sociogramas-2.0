@@ -2290,30 +2290,92 @@
       card.appendChild(leyenda);
     }
 
-    // Miembros con fit chip.
+    // Miembros con fit chip + detalle de evaluaciones internas.
     const fitIdx = {};
     if (analisis && analisis.fitPorMiembro) {
       analisis.fitPorMiembro.forEach((m) => { fitIdx[m.codigo] = m; });
     }
     const body = el("div", { class: "mt-16" });
-    g.codigos.forEach(co => {
-      const est = estIdx[co]; if (!est) return;
-      const m = fitIdx[co];
-      const fitCls = !m ? "" : (m.fit > 0.5 ? "fit-ok" : (m.fit < -0.5 ? "fit-bad" : "fit-neutro"));
-      const tags = [];
-      if (m && m.lider) tags.push(`<span class="mini-tag tag-lider" title="Referente declarado">👑</span>`);
-      if (m && m.apoyo) tags.push(`<span class="mini-tag tag-apoyo" title="Necesita apoyo">🤝</span>`);
-      if (m && m.aislado) tags.push(`<span class="mini-tag tag-aislado" title="Aislado">🫥</span>`);
-      const chip = el("span", { class: "grupo-estudiante " + fitCls, draggable: "true", title: m ? `Fit en el grupo: ${m.fit.toFixed(1)}` : "", html: `${U.escapeHtml(est.nombre)}${tags.length ? " " + tags.join("") : ""}` });
-      chip.dataset.codigo = co;
-      chip.addEventListener("dragstart", (e) => {
-        chip.classList.add("dragging");
-        e.dataTransfer.setData("text/plain", co);
+
+    if (g.isPool) {
+      // Pool "Sin asignar": layout chip simple.
+      g.codigos.forEach(co => {
+        const est = estIdx[co]; if (!est) return;
+        const chip = el("span", { class: "grupo-estudiante", draggable: "true" }, est.nombre);
+        chip.dataset.codigo = co;
+        chip.addEventListener("dragstart", (e) => {
+          chip.classList.add("dragging");
+          e.dataTransfer.setData("text/plain", co);
+        });
+        chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+        chip.addEventListener("dblclick", () => moverEstudiante(co, null));
+        body.appendChild(chip);
       });
-      chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
-      chip.addEventListener("dblclick", () => moverEstudiante(co, null));
-      body.appendChild(chip);
-    });
+    } else if (ests && resp) {
+      // Grupos reales: por cada miembro mostramos quién dentro del grupo le
+      // dió qué color (recibió) y a quiénes les dió (dio). Sólo evaluaciones
+      // de la pregunta 1 entre miembros del mismo grupo.
+      const peerSet = new Set(g.codigos);
+      // Pre-computar evaluaciones internas por miembro.
+      const internas = {};
+      g.codigos.forEach(co => internas[co] = {
+        recibidos: { verde: [], amarillo: [], rojo: [], blanco: [] },
+        dados: { verde: [], amarillo: [], rojo: [], blanco: [] },
+      });
+      resp.forEach(r => {
+        if (Number(r.numero_pregunta) !== 1) return;
+        const k = U.colorOpcionAfinidad(r.opcion_texto).key;
+        if (!k) return;
+        const from = String(r.codigo).trim();
+        const to = String(r.evaluado_codigo).trim();
+        if (!peerSet.has(from) || !peerSet.has(to) || from === to) return;
+        if (internas[to]) internas[to].recibidos[k].push(from);
+        if (internas[from]) internas[from].dados[k].push(to);
+      });
+      const iconColor = (k) => k === "verde" ? "🟢" : k === "amarillo" ? "🟡" : k === "rojo" ? "🔴" : "⚪";
+      const fmtList = (obj) => {
+        const partes = ["verde", "amarillo", "rojo", "blanco"]
+          .filter(k => obj[k].length)
+          .map(k => `<span class="grp-mb-piece grp-mb-${k}">${iconColor(k)} ${obj[k].map(c => U.escapeHtml(primerNombre((estIdx[c] || {}).nombre || c))).join(", ")}</span>`);
+        return partes.length ? partes.join(" ") : '<span class="muted">—</span>';
+      };
+
+      g.codigos.forEach(co => {
+        const est = estIdx[co]; if (!est) return;
+        const m = fitIdx[co];
+        const fitCls = !m ? "" : (m.fit > 0.5 ? "fit-ok" : (m.fit < -0.5 ? "fit-bad" : "fit-neutro"));
+        const tags = [];
+        if (m && m.lider) tags.push(`<span class="mini-tag tag-lider" title="Referente declarado">👑</span>`);
+        if (m && m.apoyo) tags.push(`<span class="mini-tag tag-apoyo" title="Necesita apoyo">🤝</span>`);
+        if (m && m.aislado) tags.push(`<span class="mini-tag tag-aislado" title="Aislado">🫥</span>`);
+        const inn = internas[co];
+
+        const row = el("div", {
+          class: "grupo-miembro-row " + fitCls,
+          draggable: "true",
+          title: m ? `Fit en el grupo: ${m.fit.toFixed(1)}` : "",
+        });
+        row.dataset.codigo = co;
+        row.innerHTML = `
+          <div class="grupo-miembro-head">
+            <span class="grp-mb-handle" title="Arrastralo para moverlo">⋮⋮</span>
+            <span class="grp-mb-nombre" title="Doble click para sacarlo del grupo">${U.escapeHtml(est.nombre)}</span>
+            ${tags.join("")}
+          </div>
+          <div class="grupo-miembro-detalle">
+            <div class="grp-mb-fila"><span class="grp-mb-label">📥 Recibió:</span> ${fmtList(inn.recibidos)}</div>
+            <div class="grp-mb-fila"><span class="grp-mb-label">📤 Dio:</span> ${fmtList(inn.dados)}</div>
+          </div>
+        `;
+        row.addEventListener("dragstart", (e) => {
+          row.classList.add("dragging");
+          e.dataTransfer.setData("text/plain", co);
+        });
+        row.addEventListener("dragend", () => row.classList.remove("dragging"));
+        row.querySelector(".grp-mb-nombre").addEventListener("dblclick", () => moverEstudiante(co, null));
+        body.appendChild(row);
+      });
+    }
     card.appendChild(body);
 
     // Matriz interna del grupo (quién dió qué a quién en la afinidad). Sólo
