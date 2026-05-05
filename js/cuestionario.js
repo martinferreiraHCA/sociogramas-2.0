@@ -839,16 +839,32 @@
     flushQueue(); // intento inmediato
   }
 
+  // Reintento con backoff exponencial + jitter, según el máximo de intentos
+  // que tenga cualquier item de la cola. Los primeros reintentos son rápidos
+  // (5s, 10s) y luego se espacian para no martillar al servidor (máx 60s).
+  function calcularDelayReintento() {
+    const q = getQueue();
+    if (!q.length) return 30000;
+    const intentos = q.reduce((m, it) => Math.max(m, it.intentos || 0), 0);
+    const base = Math.min(60000, 5000 * Math.pow(2, intentos));
+    const jitter = Math.floor(Math.random() * 2000);
+    return base + jitter;
+  }
+
   function programarReintento() {
     if (flushTimer) return;
     if (!getQueue().length) return;
-    flushTimer = setInterval(() => {
+    const tick = () => {
       if (!getQueue().length) {
-        clearInterval(flushTimer); flushTimer = null;
+        flushTimer = null;
         return;
       }
-      flushQueue();
-    }, 30000);
+      flushQueue().finally(() => {
+        if (!getQueue().length) { flushTimer = null; return; }
+        flushTimer = setTimeout(tick, calcularDelayReintento());
+      });
+    };
+    flushTimer = setTimeout(tick, calcularDelayReintento());
   }
 
   async function flushQueue() {
@@ -889,7 +905,7 @@
         if (it) actualizarPanelPendiente(it);
       }
       if (!restantes.length && flushTimer) {
-        clearInterval(flushTimer); flushTimer = null;
+        clearTimeout(flushTimer); flushTimer = null;
       }
     } finally {
       flushing = false;
@@ -943,8 +959,14 @@
     root.appendChild(cont);
   }
 
-  // Triggers de flush automáticos: cuando vuelve la conexión + un boot
-  // diferido si hay algo en la cola al arrancar.
+  // Triggers de flush automáticos: cuando vuelve la conexión, cuando el
+  // alumno vuelve a la pestaña/ventana y un boot diferido si hay algo en la
+  // cola al arrancar. Cuantos más eventos disparen el flush, más rápido se
+  // recupera el envío sin que el alumno tenga que hacer nada.
   window.addEventListener("online", () => { flushQueue(); programarReintento(); });
+  window.addEventListener("focus", () => { if (getQueue().length) flushQueue(); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && getQueue().length) flushQueue();
+  });
   if (getQueue().length) { setTimeout(flushQueue, 800); programarReintento(); }
 })();

@@ -158,6 +158,17 @@
     return out;
   }
 
+  // Timeout vía AbortController para que un Apps Script colgado no deje al
+  // usuario esperando indefinidamente. El reintento lo maneja la cola del
+  // cuestionario (no acá), así que un fallo controlado siempre es preferible
+  // a un fetch eterno.
+  function fetchConTimeout(url, opts, timeoutMs) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs || 60000);
+    const merged = Object.assign({}, opts || {}, { signal: ctrl.signal });
+    return fetch(url, merged).finally(() => clearTimeout(t));
+  }
+
   async function getJSON(action, params) {
     requireAppsScript();
     const qs = Object.entries(Object.assign({ action }, params || {}))
@@ -168,7 +179,7 @@
     const label = `[API GET] action=${action}`;
     console.debug(label, redact(Object.assign({ action }, params || {})));
     let r;
-    try { r = await fetch(url, { redirect: "follow" }); }
+    try { r = await fetchConTimeout(url, { redirect: "follow" }, 45000); }
     catch (err) { console.error(label, "fetch_failed", err); throw err; }
     if (!r.ok) { console.error(label, "HTTP " + r.status); throw new Error("HTTP " + r.status); }
     const text = await r.text();
@@ -189,12 +200,12 @@
     console.debug(label, redact(body));
     let r;
     try {
-      r = await fetch(cfg.APPS_SCRIPT_URL, {
+      r = await fetchConTimeout(cfg.APPS_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(body),
         redirect: "follow",
-      });
+      }, 75000);
     } catch (err) { console.error(label, "fetch_failed", err); throw err; }
     if (!r.ok) { console.error(label, "HTTP " + r.status); throw new Error("HTTP " + r.status); }
     const text = await r.text();

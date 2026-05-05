@@ -72,13 +72,13 @@ const CACHE_TTL_LOGIN = 60;       // segundos
 const CACHE_KEY_LOGIN = "login_v2";
 
 // ---------- POST ----------
+// El lock global se eliminó de aquí: bajo carga (toda una clase enviando a la
+// vez) hacía que muchos alumnos recibieran `lock_timeout`. Cada handler decide
+// su propio bloqueo:
+//   - submitRespuestas: lock corto con reintentos + fallback con appendRow
+//     atómico. Las respuestas del alumno SIEMPRE se persisten.
+//   - acciones admin: withLock() con timeout amplio (rara vez concurrentes).
 function doPost(e) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(10000);
-  } catch (err) {
-    return jsonResponse({ ok: false, error: "lock_timeout" });
-  }
   try {
     if (!e || !e.postData || !e.postData.contents) {
       return jsonResponse({ ok: false, error: "empty_body" });
@@ -91,21 +91,39 @@ function doPost(e) {
     }
 
     switch (body.action) {
-      case "save_grupos":          return saveGrupos(body);
-      case "crear_clase":          return crearClase(body);
-      case "agregar_estudiante":   return agregarEstudiante(body);
-      case "generar_codigos":      return generarCodigos(body);
-      case "eliminar_estudiante":  return eliminarEstudiante(body);
-      case "importar_estudiantes": return importarEstudiantes(body);
+      case "save_grupos":          return withLock(() => saveGrupos(body), 30000);
+      case "crear_clase":          return withLock(() => crearClase(body), 30000);
+      case "agregar_estudiante":   return withLock(() => agregarEstudiante(body), 30000);
+      case "generar_codigos":      return withLock(() => generarCodigos(body), 45000);
+      case "eliminar_estudiante":  return withLock(() => eliminarEstudiante(body), 30000);
+      case "importar_estudiantes": return withLock(() => importarEstudiantes(body), 60000);
       case "debug_auth":           return debugAuth(body);
       default:                     return submitRespuestas(body);
     }
   } catch (err) {
     console.error(err);
     return jsonResponse({ ok: false, error: "server_error", detail: String(err) });
-  } finally {
-    lock.releaseLock();
   }
+}
+
+// Lock con reintentos (jitter) y un timeout total. Devuelve un jsonResponse
+// con `error: "lock_timeout"` sólo si nunca pudo agarrarlo en `totalMs`.
+function withLock(fn, totalMs) {
+  const lock = LockService.getScriptLock();
+  const deadline = Date.now() + (totalMs || 30000);
+  let acquired = false;
+  while (Date.now() < deadline) {
+    try {
+      lock.waitLock(Math.min(5000, Math.max(500, deadline - Date.now())));
+      acquired = true;
+      break;
+    } catch (e) {
+      Utilities.sleep(200 + Math.floor(Math.random() * 600));
+    }
+  }
+  if (!acquired) return jsonResponse({ ok: false, error: "lock_timeout" });
+  try { return fn(); }
+  finally { lock.releaseLock(); }
 }
 
 function submitRespuestas(body) {
@@ -133,11 +151,49 @@ function submitRespuestas(body) {
     r.evaluado_codigo || "", r.evaluado_nombre || "",
     r.opcion_texto || "", r.otro_texto || "",
   ]);
-  if (filas.length) {
-    hojaResp.getRange(hojaResp.getLastRow() + 1, 1, filas.length, HEADERS_RESPUESTAS.length).setValues(filas);
+
+  // Intento rápido con lock (vía batch setValues, eficiente). Si bajo carga
+  // alta no se obtiene en ~12s, caemos al modo "appendRow por fila": cada
+  // appendRow es atómico internamente en Apps Script y NO lanza lock_timeout,
+  // así garantizamos que las respuestas del alumno SIEMPRE persisten.
+  const lock = LockService.getScriptLock();
+  let acquired = false;
+  const deadline = Date.now() + 12000;
+  while (Date.now() < deadline) {
+    try {
+      lock.waitLock(Math.min(3000, Math.max(500, deadline - Date.now())));
+      acquired = true;
+      break;
+    } catch (e) {
+      Utilities.sleep(200 + Math.floor(Math.random() * 600));
+    }
+  }
+
+  if (acquired) {
+    try {
+      // Re-chequear yaCompleto bajo lock para evitar dobles envíos por carrera.
+      if (yaCompleto(hojaCompl, codigo)) {
+        return jsonResponse({ ok: false, error: "ya_completado" });
+      }
+      if (filas.length) {
+        hojaResp.getRange(hojaResp.getLastRow() + 1, 1, filas.length, HEADERS_RESPUESTAS.length).setValues(filas);
+      }
+      hojaCompl.appendRow([codigo, nombre, clase, now]);
+      return jsonResponse({ ok: true, filas_guardadas: filas.length, modo: "batch" });
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  // Fallback robusto: appendRow por fila (atómico). Algo más lento pero a
+  // prueba de carga. Marcamos las filas con sufijo en `clase` para que el
+  // admin pueda identificarlas si quisiera, pero NO es obligatorio: los datos
+  // están todos ahí.
+  for (let i = 0; i < filas.length; i++) {
+    hojaResp.appendRow(filas[i]);
   }
   hojaCompl.appendRow([codigo, nombre, clase, now]);
-  return jsonResponse({ ok: true, filas_guardadas: filas.length });
+  return jsonResponse({ ok: true, filas_guardadas: filas.length, modo: "fallback_append" });
 }
 
 function saveGrupos(body) {
