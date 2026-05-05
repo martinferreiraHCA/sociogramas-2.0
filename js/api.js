@@ -132,6 +132,9 @@
   async function eliminarEstudiante(idToken, clase, codigo) {
     return await postJSON({ action: "eliminar_estudiante", id_token: idToken, clase, codigo });
   }
+  async function borrarRespuestas(idToken, clase, codigo) {
+    return await postJSON({ action: "borrar_respuestas", id_token: idToken, clase, codigo });
+  }
   async function importarEstudiantes(idToken, clase, estudiantes, modo) {
     return await postJSON({
       action: "importar_estudiantes",
@@ -242,6 +245,7 @@
     agregarEstudiante,
     generarCodigos,
     eliminarEstudiante,
+    borrarRespuestas,
     importarEstudiantes,
     debugAuth,
     clearCache,

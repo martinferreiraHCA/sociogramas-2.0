@@ -20,6 +20,7 @@
  *     body { action: "agregar_estudiante", id_token, clase, nombre }
  *     body { action: "generar_codigos", id_token, clase }
  *     body { action: "eliminar_estudiante", id_token, clase, codigo }
+ *     body { action: "borrar_respuestas",   id_token, clase, codigo }   → habilita reenvío
  *     body { action: "importar_estudiantes", id_token, clase, estudiantes:[{codigo,nombre}], modo }
  *
  *   GET /exec
@@ -96,6 +97,7 @@ function doPost(e) {
       case "agregar_estudiante":   return withLock(() => agregarEstudiante(body), 30000);
       case "generar_codigos":      return withLock(() => generarCodigos(body), 45000);
       case "eliminar_estudiante":  return withLock(() => eliminarEstudiante(body), 30000);
+      case "borrar_respuestas":    return withLock(() => borrarRespuestas(body), 45000);
       case "importar_estudiantes": return withLock(() => importarEstudiantes(body), 60000);
       case "debug_auth":           return debugAuth(body);
       default:                     return submitRespuestas(body);
@@ -290,6 +292,56 @@ function eliminarEstudiante(body) {
   }
   invalidarCacheLogin();
   return jsonResponse({ ok: true, borrados });
+}
+
+// Habilita el reenvío del cuestionario para un alumno: borra todas sus
+// filas en `respuestas` y su fila en `completados`. La próxima vez que
+// el alumno entre con su código va a poder enviar como si fuese la
+// primera vez. Es idempotente: si no había nada que borrar, devuelve 0.
+function borrarRespuestas(body) {
+  const admin = verificarAdminToken(body.id_token);
+  if (!admin) return jsonResponse({ ok: false, error: "unauthorized" });
+  const clase = String(body.clase || "").trim();
+  const codigo = String(body.codigo || "").trim();
+  if (!codigo) return jsonResponse({ ok: false, error: "codigo_vacio" });
+
+  const ss = SpreadsheetApp.openById(CONFIG.SHEET_ID);
+  const hojaResp = obtenerHoja(ss, HOJA_RESPUESTAS, HEADERS_RESPUESTAS);
+  const hojaCompl = obtenerHoja(ss, HOJA_COMPLETADOS, HEADERS_COMPLETADOS);
+
+  // `respuestas`: barrer de abajo hacia arriba para deletear sin reindexar.
+  let borradasResp = 0;
+  const lastResp = hojaResp.getLastRow();
+  if (lastResp >= 2) {
+    const colCodigo = HEADERS_RESPUESTAS.indexOf("codigo");
+    const valores = hojaResp.getRange(2, 1, lastResp - 1, HEADERS_RESPUESTAS.length).getValues();
+    for (let i = valores.length - 1; i >= 0; i--) {
+      if (String(valores[i][colCodigo] || "").trim() === codigo) {
+        hojaResp.deleteRow(i + 2);
+        borradasResp++;
+      }
+    }
+  }
+
+  // `completados`: igual.
+  let borradasCompl = 0;
+  const lastCompl = hojaCompl.getLastRow();
+  if (lastCompl >= 2) {
+    const colCodigo = HEADERS_COMPLETADOS.indexOf("codigo");
+    const valores = hojaCompl.getRange(2, 1, lastCompl - 1, HEADERS_COMPLETADOS.length).getValues();
+    for (let i = valores.length - 1; i >= 0; i--) {
+      if (String(valores[i][colCodigo] || "").trim() === codigo) {
+        hojaCompl.deleteRow(i + 2);
+        borradasCompl++;
+      }
+    }
+  }
+
+  return jsonResponse({
+    ok: true, codigo, clase,
+    respuestas_borradas: borradasResp,
+    completados_borrados: borradasCompl,
+  });
 }
 
 // Diagnóstico de autenticación con Google. Verifica el id_token contra el
