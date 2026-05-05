@@ -26,7 +26,7 @@
 //   params:     { tamGrupo = 4, permitirRojoMutuo = false,
 //                 distribuirLideres = true, distribuirApoyo = true,
 //                 estrategia = 'automatico',
-//                 prioridad   = 'evitar_conflictos' }
+//                 modo       = 'seguro' }
 //
 //   estrategia (cómo se eligen semillas y el orden de inserción):
 //     - 'automatico': semillas = alumnos más vulnerables (default histórico).
@@ -37,11 +37,12 @@
 //     - 'homogeneo' : semillas por cuartiles de "recibido positivo", y el
 //                     candidato preferido es el más parecido al grupo.
 //
-//   prioridad (ajusta la función objetivo para insertar y hacer swaps):
-//     - 'evitar_conflictos'    : penaliza fuerte cualquier arista negativa.
-//     - 'maximizar_colaboracion': premia aristas verdes, sobre todo mutuas.
-//     - 'desarrollar_liderazgo': premia agregar un líder a grupos sin líder.
-//     - 'integrar_aislados'    : premia poner aislados junto a populares.
+//   modo (qué matriz de afinidad por par de colores se usa al puntuar):
+//     - 'seguro'     : minimiza conflictos (penaliza fuerte rojo-cualquiera).
+//     - 'integrador' : favorece mezcla y vínculos nuevos (premia blanco-verde
+//                      y blanco-amarillo, castiga las "tibiezas" rojo-amarillo).
+//     Sólo Q1 (colores) entra en el scoring. Q5..Q14 alimentan tags de
+//     contexto que se muestran al docente pero no afectan el armado.
 //
 // Output:
 //   {
@@ -52,33 +53,33 @@
 //   }
 
 (function () {
-  // Pesos del algoritmo. Las constantes Q_* se aplican en sentido i→j: si el
-  // alumno i nominó al alumno j en esa pregunta, el lazo dirigido i→j suma
-  // ese peso. Los positivos también acumulan tag[j].recibePositivo (sirve
-  // para detectar populares); los negativos suman tag[j].recibeNegativo.
-  const W = {
-    // Pregunta 1 (afinidad por colores).
-    VERDE: +3,
-    AMARILLO: +1,
-    ROJO: -5,
-    BLANCO: 0,
-    // Bonificaciones por reciprocidad.
-    MUTUO_POSITIVO: +2,
-    MUTUO_NEGATIVO: -5,
-    // Q5 - ¿Con quiénes te gustaría trabajar?  (deseo explícito de trabajar)
-    Q_DESEA_TRABAJAR: +2,
-    // Q6 - Si tuvieras que elegir uno solo  (primera opción, lazo más fuerte)
-    Q_PRIMERA_OPCION: +4,
-    // Q7 - ¿Con quién creés que podrías trabajar bien aunque no lo hayas
-    //      hecho mucho?  (apertura a nuevos vínculos, max 3)
-    Q_PODRIA_TRABAJAR: +1,
-    // Q8 - ¿Quiénes ayudan a que el grupo funcione?  (refuerzo positivo)
-    Q_AYUDA: +1,
-    // Q9 - ¿Quiénes te hacen sentir parte?  (refuerzo social)
-    Q_SENTIR_PARTE: +1,
-    // Q14 - ¿Con quién te cuesta más trabajar?  (fricción adicional al rojo)
-    Q_CUESTA: -2,
+  // Matrices de afinidad por par de colores (Q1).
+  // Cada celda M[colorA][colorB] es el peso que aporta al par (i,j) cuando
+  // i evalúa a j con `colorA` y j evalúa a i con `colorB`. Si alguno no
+  // nominó al otro en Q1, se trata como "blanco" (neutro/sin opinión).
+  // Estas matrices son la ÚNICA fuente del scoring del armado: las preguntas
+  // Q5..Q14 se siguen leyendo para alimentar tags (líder/aislado/apoyo) que
+  // se muestran al docente, pero no influyen en el score por ahora. Se
+  // pueden incorporar más adelante de forma incremental.
+  const MATRIZ_SEGURO = {
+    verde:    { verde:  4, amarillo:  3, rojo: -4, blanco:  1 },
+    amarillo: { verde:  3, amarillo:  2, rojo: -3, blanco:  1 },
+    rojo:     { verde: -4, amarillo: -3, rojo: -5, blanco: -2 },
+    blanco:   { verde:  1, amarillo:  1, rojo: -2, blanco:  0 },
   };
+  const MATRIZ_INTEGRADOR = {
+    verde:    { verde:  4, amarillo:  3, rojo: -3, blanco:  2 },
+    amarillo: { verde:  3, amarillo:  2, rojo: -4, blanco:  1 },
+    rojo:     { verde: -3, amarillo: -4, rojo: -5, blanco: -2 },
+    blanco:   { verde:  2, amarillo:  1, rojo: -2, blanco:  0 },
+  };
+  const MATRICES = { seguro: MATRIZ_SEGURO, integrador: MATRIZ_INTEGRADOR };
+
+  // Score numérico por dirección, derivado del color que i le asignó a j en
+  // Q1. Se usa para detectar rojo-mutuo (score < 0 ↔ rojo) y para clasificar
+  // relaciones internas en el reporte (verde mutuo, unilateral, amarillo,
+  // rojo, blanco). NO se usa como peso del par: el peso lo da la matriz.
+  const SCORE_COLOR = { verde: 1, amarillo: 0.5, rojo: -1, blanco: 0 };
 
   // Umbral para considerar a alguien "líder" / "aislado" / "apoyo".
   // Se expresa como fracción de compañeros de la clase. Si N = 25 y
@@ -93,7 +94,9 @@
         distribuirLideres: true,
         distribuirApoyo: true,
         estrategia: "automatico",
-        prioridad: "evitar_conflictos",
+        // Modo de afinidad por colores. "seguro" minimiza conflictos;
+        // "integrador" favorece mezcla. Las matrices están arriba.
+        modo: "seguro",
         // Si está activo, todos los grupos quedan con el mismo tamaño ±1
         // (no se permite ningún grupo con menos de tamMin ni más de tamMax).
         tamanoEstricto: true,
@@ -101,15 +104,22 @@
       params || {}
     );
 
+    const matrizModo = MATRICES[P.modo] || MATRIZ_SEGURO;
+
     const ids = students.map((s) => s.codigo);
     const idx = {};
     ids.forEach((c, i) => (idx[c] = i));
     const N = ids.length;
     if (N === 0) return { grupos: [], resumen: {}, pares: [], estudiantes: [] };
 
-    // Matriz dirigida de afinidad: score[i][j] = valoración de i hacia j.
+    // Color que i le asignó a j en Q1. "blanco" por defecto (sin nominación)
+    // para que la matriz pueda evaluar todos los pares.
+    const colorPair = Array.from({ length: N }, () => new Array(N).fill("blanco"));
+    // Score dirigido derivado del color: usado sólo para detectar rojo-mutuo
+    // y clasificar relaciones internas en el reporte (no como peso del par).
     const score = matriz(N, 0);
-    // Tags acumulados por alumno.
+    // Tags acumulados por alumno. Q5..Q14 se siguen contando para mostrar
+    // métricas al docente, pero NO entran en el scoring del armado.
     const tag = Array.from({ length: N }, () => ({
       lider: 0,            // Q8 + Q10
       aislado: 0,          // Q12 (¿a quién le cuesta integrarse?)
@@ -146,28 +156,34 @@
       if (q === 1) {
         const c = colorDeOpcion[r.opcion_texto] ||
           (r.opcion_texto ? r.opcion_texto.toLowerCase() : "");
-        if (c === "verde")        { score[i][j] += W.VERDE;    tag[j].recibePositivo++; tag[j].verdesRecibidos++; }
-        else if (c === "amarillo"){ score[i][j] += W.AMARILLO; }
-        else if (c === "rojo")    { score[i][j] += W.ROJO;     tag[j].recibeNegativo++; tag[j].rojosRecibidos++; }
+        if (SCORE_COLOR[c] !== undefined) {
+          colorPair[i][j] = c;
+          score[i][j] = SCORE_COLOR[c];
+          if (c === "verde")    { tag[j].recibePositivo++; tag[j].verdesRecibidos++; }
+          else if (c === "rojo"){ tag[j].recibeNegativo++; tag[j].rojosRecibidos++; }
+        }
       }
-      else if (q === 5)  { score[i][j] += W.Q_DESEA_TRABAJAR;  tag[j].recibePositivo++; tag[j].deseado++; }
-      else if (q === 6)  { score[i][j] += W.Q_PRIMERA_OPCION;  tag[j].recibePositivo++; tag[j].primeraOpcion++; }
-      else if (q === 7)  { score[i][j] += W.Q_PODRIA_TRABAJAR; tag[j].recibePositivo++; tag[j].podriaTrabajar++; }
-      else if (q === 8)  { score[i][j] += W.Q_AYUDA;           tag[j].recibePositivo++; tag[j].lider++; tag[j].ayuda++; }
-      else if (q === 9)  { score[i][j] += W.Q_SENTIR_PARTE;    tag[j].recibePositivo++; tag[j].sentirParte++; }
+      // Q5..Q14: SOLO alimentan tags para que el docente vea el contexto.
+      // No suman al score del armado en esta versión.
+      else if (q === 5)  { tag[j].recibePositivo++; tag[j].deseado++; }
+      else if (q === 6)  { tag[j].recibePositivo++; tag[j].primeraOpcion++; }
+      else if (q === 7)  { tag[j].recibePositivo++; tag[j].podriaTrabajar++; }
+      else if (q === 8)  { tag[j].recibePositivo++; tag[j].lider++; tag[j].ayuda++; }
+      else if (q === 9)  { tag[j].recibePositivo++; tag[j].sentirParte++; }
       else if (q === 10) { tag[j].lider++; }
       else if (q === 12) { tag[j].aislado++; }
       else if (q === 13) { tag[j].apoyo++; }
-      else if (q === 14) { score[i][j] += W.Q_CUESTA;          tag[j].recibeNegativo++; tag[j].cuestaTrabajar++; }
+      else if (q === 14) { tag[j].recibeNegativo++; tag[j].cuestaTrabajar++; }
     });
 
-    // Matriz simétrica de pares (cohesión esperable en un grupo).
+    // Matriz simétrica de pares: peso del vínculo según la matriz del modo
+    // elegido y los colores asignados en cada dirección. El cómputo es
+    // intrínsecamente simétrico (la celda (a,b) equivale a (b,a) en ambas
+    // matrices), así que no hace falta promediar.
     const pares = matriz(N, 0);
     for (let i = 0; i < N; i++) {
       for (let j = i + 1; j < N; j++) {
-        let s = score[i][j] + score[j][i];
-        if (score[i][j] > 0 && score[j][i] > 0) s += W.MUTUO_POSITIVO;
-        if (score[i][j] < 0 && score[j][i] < 0) s += W.MUTUO_NEGATIVO;
+        const s = matrizModo[colorPair[i][j]][colorPair[j][i]];
         pares[i][j] = pares[j][i] = s;
       }
     }
@@ -292,9 +308,7 @@
         for (let g2 = g1 + 1; g2 < grupos.length; g2++) {
           for (const a of grupos[g1].miembros) {
             for (const b of grupos[g2].miembros) {
-              const delta = deltaSwap(a, b, grupos[g1].miembros, grupos[g2].miembros, pares, score, P, {
-                esLider, esApoyo, popularidad, tag,
-              });
+              const delta = deltaSwap(a, b, grupos[g1].miembros, grupos[g2].miembros, pares, score, P);
               if (delta > mejorDelta) {
                 mejorDelta = delta;
                 mejorPar = { g1, g2, a, b };
@@ -313,22 +327,24 @@
       const scoreGrupo = cohesionGrupo(G.miembros, pares);
       const warnings = [];
 
-      // Relaciones internas por par (para visualizaciones).
+      // Relaciones internas por par (para visualizaciones). Clasificamos en
+      // función de los colores reales asignados en cada dirección, no del
+      // score numérico, para que los contadores sean fieles.
       let relVerdeMutuo = 0, relVerdeUni = 0, relAmarillo = 0, relRojo = 0, relBlanco = 0;
       for (let i = 0; i < G.miembros.length; i++) {
         for (let j = i + 1; j < G.miembros.length; j++) {
           const a = G.miembros[i], b = G.miembros[j];
-          const sa = score[a][b], sb = score[b][a];
-          if (sa < 0 && sb < 0) {
+          const ca = colorPair[a][b], cb = colorPair[b][a];
+          if (ca === "rojo" && cb === "rojo") {
             relRojo++;
             warnings.push(`Rojo mutuo entre ${students[a].nombre} y ${students[b].nombre}`);
-          } else if (sa < 0 || sb < 0) {
+          } else if (ca === "rojo" || cb === "rojo") {
             relRojo++;
-          } else if (sa > 0 && sb > 0) {
+          } else if (ca === "verde" && cb === "verde") {
             relVerdeMutuo++;
-          } else if (sa > 0 || sb > 0) {
+          } else if (ca === "verde" || cb === "verde") {
             relVerdeUni++;
-          } else if (esAmbivalente(a, b, score, students)) {
+          } else if (ca === "amarillo" || cb === "amarillo") {
             relAmarillo++;
           } else {
             relBlanco++;
@@ -433,15 +449,6 @@
     return false;
   }
 
-  // ¿El vínculo a↔b tiene al menos una evaluación amarilla (sin verde ni rojo)?
-  // La matriz `score` no distingue colores (sólo el peso sumado), así que
-  // aproximamos: si score[a][b] o score[b][a] está entre W.BLANCO y W.AMARILLO
-  // sin ser 0 exacto, lo consideramos amarillo.
-  function esAmbivalente(a, b, score) {
-    const sa = score[a][b], sb = score[b][a];
-    return (sa > 0 && sa <= 1) || (sb > 0 && sb <= 1);
-  }
-
   // Devuelve el miembro del grupo cuyo aporte (suma de pares con el resto)
   // es el más bajo. Sirve para decidir a quién sacar cuando hay que
   // rebalancear tamaños.
@@ -463,7 +470,7 @@
     return s;
   }
 
-  function deltaSwap(a, b, G1, G2, pares, score, P, ctx) {
+  function deltaSwap(a, b, G1, G2, pares, score, P) {
     // Antes: a en G1, b en G2. Después: a en G2 (sin b), b en G1 (sin a).
     let antes = 0, despues = 0;
     for (const m of G1) if (m !== a) { antes += pares[a][m]; despues += pares[b][m]; }
@@ -473,20 +480,10 @@
       for (const m of G2) if (m !== b && score[a][m] < 0 && score[m][a] < 0) return -Infinity;
       for (const m of G1) if (m !== a && score[b][m] < 0 && score[m][b] < 0) return -Infinity;
     }
-    // Ajustes por prioridad: recalcular componentes del score que dependen
-    // del grupo (no sólo de aristas), como "presencia de líder".
-    const g1Sin = G1.filter((x) => x !== a);
-    const g2Sin = G2.filter((x) => x !== b);
-    const bonoAntes =
-      bonoGrupoPorPrioridad(g1Sin.concat(a), P.prioridad, ctx) +
-      bonoGrupoPorPrioridad(g2Sin.concat(b), P.prioridad, ctx);
-    const bonoDespues =
-      bonoGrupoPorPrioridad(g1Sin.concat(b), P.prioridad, ctx) +
-      bonoGrupoPorPrioridad(g2Sin.concat(a), P.prioridad, ctx);
-    return (despues - antes) + (bonoDespues - bonoAntes);
+    return despues - antes;
   }
 
-  // ---- Estrategia y prioridad ----
+  // ---- Estrategia ----
   function elegirSemillas(idxs, k, estrategia, h) {
     if (k <= 0) return [];
     const byVuln = idxs.slice().sort((a, b) => h.vulnerabilidad(b) - h.vulnerabilidad(a));
@@ -554,69 +551,19 @@
     let s = 0;
     for (const m of miembros) s += pares[cand][m];
 
-    // Distribución de roles (como antes).
+    // Distribución de roles: aunque los tags Q8/Q10/Q13 no sumen al peso del
+    // par, sí ayudan a no concentrar líderes ni alumnos que necesitan apoyo
+    // en un mismo grupo. Es ortogonal a las matrices de afinidad.
     if (P.distribuirLideres && ctx.esLider(cand) && miembros.some(ctx.esLider)) s -= 3;
     if (P.distribuirApoyo  && ctx.esApoyo(cand)  && miembros.some(ctx.esApoyo))  s -= 2;
 
-    // Ajuste por prioridad.
-    switch (P.prioridad) {
-      case "maximizar_colaboracion": {
-        // Premio extra por cada lazo verde mutuo con algún miembro actual.
-        for (const m of miembros) {
-          if (score[cand][m] > 0 && score[m][cand] > 0) s += 2;
-        }
-        break;
-      }
-      case "desarrollar_liderazgo": {
-        // Si el grupo todavía no tiene líder y el candidato sí, premio.
-        if (ctx.esLider(cand) && !miembros.some(ctx.esLider)) s += 4;
-        break;
-      }
-      case "integrar_aislados": {
-        // Poner un aislado/rechazado con un grupo de populares suma.
-        const candVuln = ctx.tag[cand].aislado + ctx.tag[cand].recibeNegativo;
-        if (candVuln > 0) {
-          const popularidadGrupo = miembros.reduce((a, m) => a + ctx.popularidad(m), 0);
-          if (popularidadGrupo > 0) s += Math.min(4, popularidadGrupo);
-        }
-        // Y desalentar poner varios vulnerables juntos.
-        const vulnEnGrupo = miembros.filter((m) => ctx.tag[m].aislado + ctx.tag[m].recibeNegativo > 0).length;
-        if (candVuln > 0 && vulnEnGrupo >= 1) s -= 3;
-        break;
-      }
-      case "evitar_conflictos":
-      default: {
-        // Ya está en pares[] (el rojo pesa -5). Refuerzo extra por cada arista
-        // negativa (incluso unilateral) con miembros actuales.
-        for (const m of miembros) {
-          if (score[cand][m] < 0 || score[m][cand] < 0) s -= 1;
-        }
-      }
-    }
-
-    // Homogeneidad: si estrategia es 'homogeneo', favorece candidatos con
+    // Homogeneidad: si la estrategia es 'homogeneo', favorece candidatos con
     // popularidad similar al promedio del grupo.
     if (P.estrategia === "homogeneo" && miembros.length) {
       const prom = miembros.reduce((a, m) => a + ctx.popularidad(m), 0) / miembros.length;
       s -= Math.abs(ctx.popularidad(cand) - prom) * 0.5;
     }
     return s;
-  }
-
-  function bonoGrupoPorPrioridad(miembros, prioridad, ctx) {
-    if (!ctx) return 0;
-    if (prioridad === "desarrollar_liderazgo") {
-      return miembros.some(ctx.esLider) ? 3 : 0;
-    }
-    if (prioridad === "integrar_aislados") {
-      const vulnCount = miembros.filter((m) => ctx.tag[m].aislado + ctx.tag[m].recibeNegativo > 0).length;
-      // Premio si hay exactamente un vulnerable (queda integrado sin juntarse
-      // con otros).
-      if (vulnCount === 1) return 2;
-      if (vulnCount >= 2) return -2;
-      return 0;
-    }
-    return 0;
   }
 
   function swap(a, b, G1, G2) {
