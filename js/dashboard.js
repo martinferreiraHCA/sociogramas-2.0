@@ -128,7 +128,7 @@
     tamGrupo: 4,
     permitirRojoMutuo: false,
     estrategia: "automatico",
-    prioridad: "evitar_conflictos",
+    modo: "seguro",
   };
   // Indica si `gruposLocal` viene de un borrador local (no guardado en la
   // planilla). Se muestra como badge y se limpia al hacer Guardar.
@@ -196,7 +196,12 @@
         const bor = cargarBorrador(claseSel);
         if (bor && Array.isArray(bor.gruposLocal) && bor.gruposLocal.length) {
           gruposLocal = bor.gruposLocal;
-          if (bor.gruposConfig) gruposConfig = Object.assign({}, gruposConfig, bor.gruposConfig);
+          if (bor.gruposConfig) {
+            // Drafts viejos (anteriores al cambio de modelo) traen `prioridad`.
+            // Lo ignoramos y caemos al modo default ("seguro").
+            const { prioridad, ...resto } = bor.gruposConfig;
+            gruposConfig = Object.assign({}, gruposConfig, resto);
+          }
           draftActivo = true;
           console.info(`[draft] Recuperado borrador de "${claseSel}" (${bor.savedAt})`);
         } else {
@@ -308,7 +313,7 @@
     if (selNode) selNode.addEventListener("change", async () => {
       claseSel = selNode.value || "";
       gruposLocal = null; resultadoAlgoritmo = null;
-      gruposConfig = { tamGrupo: 4, permitirRojoMutuo: false, estrategia: "automatico", prioridad: "evitar_conflictos" };
+      gruposConfig = { tamGrupo: 4, permitirRojoMutuo: false, estrategia: "automatico", modo: "seguro" };
       draftActivo = false;
       const url = new URL(window.location.href);
       if (claseSel) url.searchParams.set("clase", claseSel);
@@ -1143,7 +1148,7 @@
           <button class="guia-tab" data-tab="socio">🧭 Sociograma</button>
           <button class="guia-tab" data-tab="detalle">👤 Detalle por alumno</button>
           <button class="guia-tab" data-tab="grupos">🧩 Análisis de grupos</button>
-          <button class="guia-tab" data-tab="estrategias">🎯 Estrategias y prioridades</button>
+          <button class="guia-tab" data-tab="estrategias">🎯 Modos y estrategias</button>
           <button class="guia-tab" data-tab="flujo">📥 Flujo completo</button>
         </div>
 
@@ -1214,7 +1219,7 @@
         </div>
 
         <div class="guia-pane" data-pane="estrategias">
-          <p>La función objetivo combina <b>estrategia</b> (cómo arranca a armar) y <b>prioridad</b> (qué premia al decidir).</p>
+          <p>La función objetivo combina el <b>modo</b> (qué matriz de afinidad por color usa al puntuar pares) y la <b>estrategia</b> (cómo arranca a armar). El scoring de esta versión usa sólo la pregunta de colores; las demás preguntas alimentan métricas de contexto pero no el armado.</p>
           <h5 class="guia-h5">Estrategia</h5>
           <ul class="guia-list">
             <li><b>Automático</b>: semillas = alumnos más vulnerables. Luego inserta por intensidad de opiniones. Robusto, default.</li>
@@ -1223,14 +1228,14 @@
             <li><b>Inclusión</b>: semillas = aislados/rechazados, para que queden en grupos distintos y rodeados de apoyo.</li>
             <li><b>Liderazgo</b>: semillas = referentes. Garantiza un líder claro en cada grupo.</li>
           </ul>
-          <h5 class="guia-h5">Prioridad</h5>
+          <h5 class="guia-h5">Modo de afinidad</h5>
+          <p>Cada par de alumnos (i, j) se puntúa con una matriz que cruza el color que i le asignó a j con el color que j le asignó a i. Si alguno no nominó al otro, se trata como "blanco" (neutro/sin opinión).</p>
           <ul class="guia-list">
-            <li><b>Evitar conflictos</b>: penaliza cualquier arista negativa. Suave para el grupo pero puede dejar a algunos aislados.</li>
-            <li><b>Maximizar colaboración</b>: premia verdes mutuos. Grupos con buena química interna, pero puede concentrar a los populares.</li>
-            <li><b>Desarrollar liderazgo</b>: premio extra si el grupo tiene un referente. Útil cuando la tarea exige coordinación.</li>
-            <li><b>Integrar aislados</b>: premia poner un aislado con populares; desalienta juntar varios vulnerables en el mismo grupo.</li>
+            <li><b>🛡️ Seguro</b>: minimiza conflictos. Penaliza fuerte cualquier rojo (rojo↔verde = −4, rojo↔rojo = −5) y premia las afinidades sólidas (verde↔verde = +4). Pensado para tareas en las que el costo de un grupo que no funciona es alto.</li>
+            <li><b>🤝 Integrador</b>: favorece la mezcla. Premia juntar verdes/amarillos con compañeros sin opinión declarada (verde↔blanco = +2, blanco↔blanco = 0) para abrir vínculos nuevos. Penaliza más fuerte las "tibiezas" (rojo↔amarillo = −4) que dejan al grupo sin energía clara.</li>
           </ul>
-          <p class="muted mt-16"><b>Explorar alternativas</b> corre seis combinaciones y las pone lado a lado para que compares y elijas.</p>
+          <p class="muted mt-16"><b>Nota</b>: en esta versión solo Q1 (colores) entra al scoring. Las preguntas Q5–Q14 se siguen procesando para alimentar las métricas del docente (líder, aislado, popularidad), pero no afectan el armado. Se incorporarán de forma incremental.</p>
+          <p class="muted mt-16"><b>Explorar alternativas</b> corre seis combinaciones (modo × estrategia) y las pone lado a lado para que compares y elijas.</p>
         </div>
 
         <div class="guia-pane" data-pane="flujo">
@@ -1239,7 +1244,7 @@
             <li><b>Paso 2 · Respuestas</b>: los alumnos entran al cuestionario con su código; cada respuesta se guarda en la planilla. El stepper arriba te muestra cuántos completaron.</li>
             <li><b>Sociograma</b>: cuando hay respuestas, es la vista rápida de quién se lleva con quién. Lo usás para detectar bolitas aisladas, tríadas fuertes, polarización por rojos.</li>
             <li><b>Respuestas por estudiante</b>: tarjetas compactas con el resumen de cada alumno. Click para abrir el detalle completo.</li>
-            <li><b>Paso 3 · Armado de grupos</b>: elegís estrategia + prioridad + tamaño y el algoritmo genera una propuesta. Podés: editar arrastrando, regenerar, explorar alternativas, o guardarlo en la planilla. El borrador se auto-guarda en tu navegador por si cerrás sin guardar.</li>
+            <li><b>Paso 3 · Armado de grupos</b>: elegís modo + estrategia + tamaño y el algoritmo genera una propuesta. Podés: editar arrastrando, regenerar, explorar alternativas, o guardarlo en la planilla. El borrador se auto-guarda en tu navegador por si cerrás sin guardar.</li>
           </ol>
         </div>
       </div>
@@ -1886,7 +1891,7 @@
     const c = el("div", { class: "panel-container" });
     c.innerHTML = `
       <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <h3>3 · Armado de grupos ${ayuda("Algoritmo en 4 fases: (1) calcula afinidades y bonificaciones por reciprocidad, (2) elige semillas según la estrategia, (3) inserta el resto greedy por score, (4) aplica swaps tipo Kernighan-Lin. Abrí la guía para el detalle.")} <a href="javascript:void(0)" class="guia-link" onclick="document.getElementById('btn-guia').click()">📖</a> ${draftActivo ? '<span class="badge badge-pending" title="Hay cambios en local que todavía no están en la planilla">📝 borrador no guardado</span>' : ''}</h3>
+        <h3>3 · Armado de grupos ${ayuda("Algoritmo en 4 fases: (1) puntúa cada par con la matriz del modo elegido (seguro/integrador) según los colores que cada uno asignó al otro, (2) elige semillas según la estrategia, (3) inserta el resto greedy por score, (4) aplica swaps tipo Kernighan-Lin. Abrí la guía para el detalle.")} <a href="javascript:void(0)" class="guia-link" onclick="document.getElementById('btn-guia').click()">📖</a> ${draftActivo ? '<span class="badge badge-pending" title="Hay cambios en local que todavía no están en la planilla">📝 borrador no guardado</span>' : ''}</h3>
         <div class="flex-row" style="gap:8px;flex-wrap:wrap">
           <button class="btn btn-gray btn-sm" id="btn-add-grupo">+ Grupo</button>
           <button class="btn btn-orange btn-sm" id="btn-reset">Reiniciar</button>
@@ -1915,14 +1920,12 @@
             </select>
           </label>
           <label>
-            <span>⚖️ Prioridad ${ayuda("Qué premia la función objetivo al decidir la composición: minimizar conflictos, maximizar colaboración, garantizar un referente, o integrar aislados.")}</span>
-            <select id="prioridad" class="cuestionario-select">
+            <span>🎨 Modo de afinidad ${ayuda("Qué matriz de pares por color usa el algoritmo. Seguro: minimiza conflictos (penaliza fuerte cualquier rojo). Integrador: favorece mezcla y vínculos nuevos (premia juntar verdes/amarillos con compañeros sin opinión declarada).")}</span>
+            <select id="modo" class="cuestionario-select">
               ${[
-                ["evitar_conflictos","Evitar conflictos"],
-                ["maximizar_colaboracion","Maximizar colaboración"],
-                ["desarrollar_liderazgo","Desarrollar liderazgo"],
-                ["integrar_aislados","Integrar aislados"],
-              ].map(([v,l]) => `<option value="${v}" ${gruposConfig.prioridad===v?"selected":""}>${l}</option>`).join("")}
+                ["seguro","🛡️ Seguro (minimiza conflictos)"],
+                ["integrador","🤝 Integrador (favorece mezcla)"],
+              ].map(([v,l]) => `<option value="${v}" ${gruposConfig.modo===v?"selected":""}>${l}</option>`).join("")}
             </select>
           </label>
           <label class="grupos-config-check">
@@ -1945,7 +1948,7 @@
     const tamInp = c.querySelector("#tam-grupo");
     const rojoInp = c.querySelector("#permitir-rojo");
     const estrInp = c.querySelector("#estrategia");
-    const prioInp = c.querySelector("#prioridad");
+    const modoInp = c.querySelector("#modo");
 
     // Stats de compatibilidad del curso (independientes de los grupos).
     renderCompatStats(c.querySelector("#grupos-compat-stats"), ests, resp);
@@ -1955,7 +1958,7 @@
         tamGrupo: parseInt(tamInp.value, 10) || 4,
         permitirRojoMutuo: rojoInp.checked,
         estrategia: estrInp.value,
-        prioridad: prioInp.value,
+        modo: modoInp.value,
       };
       resultadoAlgoritmo = GROUPS.formarGrupos(ests, resp, opciones, gruposConfig);
       gruposLocal = resultadoAlgoritmo.grupos.map(g => ({ nombre: g.nombre, codigos: [...g.codigos] }));
@@ -2033,20 +2036,20 @@
     return c;
   }
 
-  // Ejecuta formarGrupos con varias combinaciones estrategia × prioridad
-  // y muestra los resultados side-by-side para comparar y elegir uno.
+  // Ejecuta formarGrupos con varias combinaciones modo × estrategia y
+  // muestra los resultados side-by-side para comparar y elegir uno.
   function abrirModalAlternativas(ests, resp) {
     const tamGrupo = parseInt(document.querySelector("#tam-grupo")?.value, 10) || 4;
     const permitir = document.querySelector("#permitir-rojo")?.checked;
     const base = { tamGrupo, permitirRojoMutuo: permitir };
 
     const COMBOS = [
-      { label: "Balanceado · evitar conflictos", estrategia: "automatico", prioridad: "evitar_conflictos", hint: "Default robusto" },
-      { label: "Balanceado · maximizar colaboración", estrategia: "balanceado", prioridad: "maximizar_colaboracion", hint: "Privilegia verdes mutuos" },
-      { label: "Liderazgo · desarrollar líderes", estrategia: "liderazgo", prioridad: "desarrollar_liderazgo", hint: "Un referente por grupo" },
-      { label: "Inclusión · integrar aislados", estrategia: "inclusion", prioridad: "integrar_aislados", hint: "Separa vulnerables entre grupos" },
-      { label: "Homogéneo · niveles parejos", estrategia: "homogeneo", prioridad: "evitar_conflictos", hint: "Grupos con perfiles similares" },
-      { label: "Colaboración intensa", estrategia: "automatico", prioridad: "maximizar_colaboracion", hint: "Arranca seguro, premia verdes" },
+      { label: "🛡️ Seguro · automático", modo: "seguro", estrategia: "automatico", hint: "Default robusto, evita rojos" },
+      { label: "🛡️ Seguro · liderazgo", modo: "seguro", estrategia: "liderazgo", hint: "Un referente por grupo" },
+      { label: "🛡️ Seguro · inclusión", modo: "seguro", estrategia: "inclusion", hint: "Distribuye aislados, evita conflictos" },
+      { label: "🤝 Integrador · automático", modo: "integrador", estrategia: "automatico", hint: "Premia mezcla y vínculos nuevos" },
+      { label: "🤝 Integrador · balanceado", modo: "integrador", estrategia: "balanceado", hint: "Mix de líderes y vulnerables" },
+      { label: "🤝 Integrador · inclusión", modo: "integrador", estrategia: "inclusion", hint: "Distribuye aislados con apertura" },
     ];
 
     const overlay = el("div", { class: "modal-overlay" });
@@ -2084,7 +2087,7 @@
       grid.appendChild(placeholder);
       setTimeout(() => {
         try {
-          const r = GROUPS.formarGrupos(ests, resp, opciones, Object.assign({}, base, { estrategia: c.estrategia, prioridad: c.prioridad }));
+          const r = GROUPS.formarGrupos(ests, resp, opciones, Object.assign({}, base, { estrategia: c.estrategia, modo: c.modo }));
           resultados[idx] = r;
           grid.replaceChild(renderAltCard(c, r, () => aplicarAlternativa(r, cerrar), info), placeholder);
         } catch (err) {
@@ -2143,7 +2146,7 @@
     `;
     card.querySelector(".alt-actions button").addEventListener("click", onAplicar);
     card.addEventListener("mouseenter", () => {
-      info.innerHTML = `Estrategia <b>${U.escapeHtml(combo.estrategia)}</b> · prioridad <b>${U.escapeHtml(combo.prioridad)}</b> · score ${score.toFixed(1)}`;
+      info.innerHTML = `Modo <b>${U.escapeHtml(combo.modo)}</b> · estrategia <b>${U.escapeHtml(combo.estrategia)}</b> · score ${score.toFixed(1)}`;
     });
     return card;
   }
