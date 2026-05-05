@@ -532,6 +532,13 @@
             title: "Copiar código",
             onclick: () => navigator.clipboard.writeText(e.codigo).then(() => U.toast("Código copiado", "success")),
           }, "📋"));
+          if (codigosCompl.has(e.codigo)) {
+            acts.appendChild(el("button", {
+              class: "btn btn-orange btn-sm",
+              title: "Habilitar reenvío (borra sus respuestas)",
+              onclick: () => habilitarReenvio(e),
+            }, "🔄"));
+          }
         }
         acts.appendChild(el("button", {
           class: "btn btn-red btn-sm",
@@ -1080,6 +1087,31 @@
       await refrescar();
     } catch (err) {
       console.error("eliminar_estudiante error de red:", err);
+      U.toast("Error de conexión: " + (err.message || err), "error");
+    }
+  }
+
+  async function habilitarReenvio(est) {
+    if (!est.codigo) return;
+    const ok = confirm(
+      `Esto va a borrar las respuestas de ${est.nombre} (${est.codigo}) y le va a permitir reenviar el cuestionario.\n\n` +
+      `Una vez borradas no se pueden recuperar. ¿Continuar?`
+    );
+    if (!ok) return;
+    try {
+      const r = await API.borrarRespuestas(pw, claseSel, est.codigo);
+      if (!r || !r.ok) {
+        console.error("borrar_respuestas falló:", r);
+        U.toast("Error: " + ((r && r.error) || "desconocido") + " · mirá la consola", "error");
+        return;
+      }
+      const detalle = r.respuestas_borradas
+        ? `${r.respuestas_borradas} respuestas borradas`
+        : "no había respuestas previas";
+      U.toast(`${est.nombre} puede reenviar (${detalle})`, "success");
+      await refrescar();
+    } catch (err) {
+      console.error("borrar_respuestas error de red:", err);
       U.toast("Error de conexión: " + (err.message || err), "error");
     }
   }

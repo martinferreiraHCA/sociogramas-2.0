@@ -790,7 +790,7 @@
         return;
       }
       const map = {
-        ya_completado: "Este código ya envió sus respuestas.",
+        ya_completado: "Tus respuestas anteriores siguen guardadas. Para reenviar tenés que pedirle al docente que te habilite el reenvío desde su panel; recién después podés volver a entrar y enviar.",
         codigo_invalido: "Código de estudiante inválido.",
         forbidden: "El token del front no coincide con el del Apps Script.",
         sin_respuestas: "No hay respuestas para enviar.",
@@ -955,8 +955,30 @@
     cont.innerHTML = `
       <h2 class="cuestionario-titulo-finalizado">¡Completaste el cuestionario!</h2>
       <p class="mb-16">Gracias por tu participación. Tus respuestas se enviaron correctamente.</p>
-      <a class="btn" href="./index.html">Volver al inicio</a>`;
+      <div class="flex-row" style="gap:8px;justify-content:center;flex-wrap:wrap">
+        <a class="btn" href="./index.html">Volver al inicio</a>
+        <button class="btn btn-gray" id="btn-rehacer">Tuve un problema, rehacer</button>
+      </div>
+      <p class="muted mt-16" style="font-size:0.85em">
+        Si te equivocaste o tuviste un problema al enviar, podés rehacer el cuestionario.
+        Avisale al docente: él tiene que habilitar el reenvío desde el panel para que tus
+        nuevas respuestas se guarden.
+      </p>`;
     root.appendChild(cont);
+    cont.querySelector("#btn-rehacer").addEventListener("click", () => {
+      const ok = confirm(
+        "Esto va a borrar tus respuestas guardadas en este dispositivo y vas a empezar el " +
+        "cuestionario de cero.\n\nIMPORTANTE: para que las nuevas respuestas se guarden, tu " +
+        "docente tiene que habilitarte el reenvío desde el panel. Si todavía no lo hizo, " +
+        "tus respuestas nuevas no se van a poder enviar.\n\n¿Continuar?"
+      );
+      if (!ok) return;
+      U.lsDel(STATE_KEY);
+      // Saco también de la cola por las dudas (no debería estar si ya finalizó).
+      const q = getQueue().filter(it => it.codigo !== codigo);
+      setQueue(q);
+      location.reload();
+    });
   }
 
   // Triggers de flush automáticos: cuando vuelve la conexión, cuando el
