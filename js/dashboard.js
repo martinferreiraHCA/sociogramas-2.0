@@ -1964,7 +1964,12 @@
             <input id="permitir-rojo" type="checkbox" ${gruposConfig.permitirRojoMutuo?"checked":""} />
             <span>Permitir rojos mutuos ${ayuda("Por default el algoritmo veta juntar dos alumnos que se marcaron rojo entre sí. Marcá esto si preferís priorizar otras restricciones.")}</span>
           </label>
+          <label class="grupos-config-check">
+            <input id="tam-custom-toggle" type="checkbox" ${Array.isArray(gruposConfig.tamGruposPersonalizados) && gruposConfig.tamGruposPersonalizados.length ? "checked" : ""} />
+            <span>Tamaños personalizados ${ayuda("Activá esto para definir el tamaño de cada grupo por separado (por ejemplo, 3 grupos de 4 y 2 grupos de 5). Si está desactivado, el algoritmo usa el tamaño preferido y distribuye lo más uniforme posible.")}</span>
+          </label>
         </div>
+        <div id="tam-custom-editor" class="tam-custom-editor" style="display:none"></div>
         <div class="grupos-config-actions">
           <button class="btn btn-blue" id="btn-auto">🎯 Generar grupos</button>
           <button class="btn btn-gray btn-sm" id="btn-regenerar" title="Vuelve a correr con los mismos parámetros">🔄 Regenerar</button>
@@ -1981,16 +1986,131 @@
     const rojoInp = c.querySelector("#permitir-rojo");
     const estrInp = c.querySelector("#estrategia");
     const modoInp = c.querySelector("#modo");
+    const customToggle = c.querySelector("#tam-custom-toggle");
+    const customEditor = c.querySelector("#tam-custom-editor");
 
     // Stats de compatibilidad del curso (independientes de los grupos).
     renderCompatStats(c.querySelector("#grupos-compat-stats"), ests, resp);
 
+    // ---- Editor de tamaños personalizados ----
+    // Se mantiene un array local de tamaños y se sincroniza con
+    // gruposConfig.tamGruposPersonalizados al regenerar. La validación de
+    // suma == N habilita/deshabilita el botón "Generar grupos".
+    const N = ests.length;
+    let tamCustom = Array.isArray(gruposConfig.tamGruposPersonalizados) && gruposConfig.tamGruposPersonalizados.length
+      ? gruposConfig.tamGruposPersonalizados.slice()
+      : null;
+
+    function distribucionPorDefecto() {
+      const t = parseInt(tamInp.value, 10) || 4;
+      const sug = GROUPS.sugerirDistribuciones(N, t);
+      return (sug[0] && sug[0].tamanios.slice()) || [N];
+    }
+    function asegurarCustom() {
+      if (!tamCustom || !tamCustom.length) tamCustom = distribucionPorDefecto();
+    }
+    function sumaCustom() {
+      return (tamCustom || []).reduce((a, b) => a + (parseInt(b, 10) || 0), 0);
+    }
+    function btnGenerarEnabled() {
+      const btn = c.querySelector("#btn-auto");
+      const ok = !customToggle.checked || sumaCustom() === N;
+      btn.disabled = !ok;
+      btn.title = ok ? "" : `La suma de tamaños debe ser ${N} (es ${sumaCustom()}).`;
+    }
+    function renderEditorCustom() {
+      if (!customToggle.checked) {
+        customEditor.style.display = "none";
+        btnGenerarEnabled();
+        return;
+      }
+      asegurarCustom();
+      customEditor.style.display = "";
+      const t = parseInt(tamInp.value, 10) || 4;
+      const sugerencias = GROUPS.sugerirDistribuciones(N, t);
+      const suma = sumaCustom();
+      const sumaOk = suma === N;
+      customEditor.innerHTML = `
+        <div class="tam-custom-head">
+          <b>💡 Sugerencias para ${N} alumnos · tamaño preferido ${t}:</b>
+          <div class="tam-custom-suges">
+            ${sugerencias.map((s, i) => `
+              <button type="button" class="btn btn-gray btn-sm tam-sug" data-idx="${i}" title="${U.escapeHtml(s.etiqueta)}">
+                ${s.numGrupos} grupos · ${s.tamanios.join("·")}
+              </button>`).join("")}
+          </div>
+        </div>
+        <div class="tam-custom-list" id="tam-custom-list"></div>
+        <div class="tam-custom-foot">
+          <button type="button" class="btn btn-gray btn-sm" id="btn-add-tam">+ Grupo</button>
+          <span class="tam-custom-suma ${sumaOk ? "ok" : "err"}">
+            Total: <b>${suma}</b> / ${N}
+            ${sumaOk ? "✅" : "⚠ ajustá los tamaños para que sumen " + N}
+          </span>
+        </div>`;
+      const list = customEditor.querySelector("#tam-custom-list");
+      tamCustom.forEach((tam, i) => {
+        const row = el("div", { class: "tam-custom-row" });
+        row.innerHTML = `
+          <span class="tam-custom-label">Grupo ${i + 1}</span>
+          <input type="number" min="2" max="9" class="tam-custom-input" data-idx="${i}" value="${tam}" />
+          <button type="button" class="btn btn-red btn-sm tam-del" data-idx="${i}" title="Quitar este grupo">✕</button>`;
+        list.appendChild(row);
+      });
+      list.querySelectorAll(".tam-custom-input").forEach((inp) => {
+        inp.addEventListener("input", () => {
+          const idx = parseInt(inp.dataset.idx, 10);
+          tamCustom[idx] = Math.max(1, parseInt(inp.value, 10) || 0);
+          // Actualizo solo el footer (suma + botón) sin re-renderizar todo
+          // para no perder el foco del input.
+          const suma = sumaCustom();
+          const sumaOk = suma === N;
+          const sumaSpan = customEditor.querySelector(".tam-custom-suma");
+          sumaSpan.className = "tam-custom-suma " + (sumaOk ? "ok" : "err");
+          sumaSpan.innerHTML = `Total: <b>${suma}</b> / ${N} ${sumaOk ? "✅" : "⚠ ajustá los tamaños para que sumen " + N}`;
+          btnGenerarEnabled();
+        });
+      });
+      list.querySelectorAll(".tam-del").forEach((b) => {
+        b.addEventListener("click", () => {
+          if (tamCustom.length <= 1) return;
+          const idx = parseInt(b.dataset.idx, 10);
+          tamCustom.splice(idx, 1);
+          renderEditorCustom();
+        });
+      });
+      customEditor.querySelector("#btn-add-tam").addEventListener("click", () => {
+        tamCustom.push(t);
+        renderEditorCustom();
+      });
+      customEditor.querySelectorAll(".tam-sug").forEach((b) => {
+        b.addEventListener("click", () => {
+          const idx = parseInt(b.dataset.idx, 10);
+          tamCustom = sugerencias[idx].tamanios.slice();
+          renderEditorCustom();
+        });
+      });
+      btnGenerarEnabled();
+    }
+
+    customToggle.addEventListener("change", () => {
+      if (customToggle.checked) asegurarCustom();
+      renderEditorCustom();
+    });
+    tamInp.addEventListener("change", () => {
+      // Si el editor está abierto, refrescar las sugerencias para el tamaño nuevo.
+      if (customToggle.checked) renderEditorCustom();
+    });
+    renderEditorCustom();
+
     const generar = () => {
+      const usarCustom = customToggle.checked && sumaCustom() === N;
       gruposConfig = {
         tamGrupo: parseInt(tamInp.value, 10) || 4,
         permitirRojoMutuo: rojoInp.checked,
         estrategia: estrInp.value,
         modo: modoInp.value,
+        tamGruposPersonalizados: usarCustom ? tamCustom.slice() : null,
       };
       resultadoAlgoritmo = GROUPS.formarGrupos(ests, resp, opciones, gruposConfig);
       gruposLocal = resultadoAlgoritmo.grupos.map(g => ({ nombre: g.nombre, codigos: [...g.codigos] }));
@@ -2073,7 +2193,22 @@
   function abrirModalAlternativas(ests, resp) {
     const tamGrupo = parseInt(document.querySelector("#tam-grupo")?.value, 10) || 4;
     const permitir = document.querySelector("#permitir-rojo")?.checked;
-    const base = { tamGrupo, permitirRojoMutuo: permitir };
+    // Si el editor de tamaños custom está activo y la suma es válida, lo
+    // propagamos a todas las alternativas para que respeten los mismos
+    // tamaños y la comparación sea justa. Leemos en vivo del DOM por si el
+    // docente todavía no generó después de cambiar los tamaños.
+    let tamCustomActivos = null;
+    if (document.querySelector("#tam-custom-toggle")?.checked) {
+      const inputs = Array.from(document.querySelectorAll("#tam-custom-list .tam-custom-input"));
+      const arr = inputs.map(i => parseInt(i.value, 10) || 0);
+      if (arr.length && arr.reduce((a, b) => a + b, 0) === ests.length) {
+        tamCustomActivos = arr;
+      }
+    }
+    const base = {
+      tamGrupo, permitirRojoMutuo: permitir,
+      tamGruposPersonalizados: tamCustomActivos,
+    };
 
     const COMBOS = [
       { label: "🛡️ Seguro · automático", modo: "seguro", estrategia: "automatico", hint: "Default robusto, evita rojos" },

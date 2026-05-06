@@ -26,7 +26,11 @@
 //   params:     { tamGrupo = 4, permitirRojoMutuo = false,
 //                 distribuirLideres = true, distribuirApoyo = true,
 //                 estrategia = 'automatico',
-//                 modo       = 'seguro' }
+//                 modo       = 'seguro',
+//                 tamGruposPersonalizados?: [4, 4, 5, 5, 4]  // opcional:
+//                   array de tamaños individuales por grupo. Si suma N,
+//                   se respeta exacto y se ignora `tamGrupo`. Si no suma
+//                   N, se descarta y se vuelve al modo automático. }
 //
 //   estrategia (cómo se eligen semillas y el orden de inserción):
 //     - 'automatico': semillas = alumnos más vulnerables (default histórico).
@@ -194,17 +198,27 @@
     const esApoyo = (k) => tag[k].apoyo >= thr;
     const esAislado = (k) => tag[k].aislado >= Math.max(1, Math.ceil(thr / 2));
 
-    // --- Fase 2: determinar número de grupos y rangos de tamaño ---
-    // numGrupos = ceil(N/tamGrupo) si queremos respetar el tamaño "tope",
-    //             round(N/tamGrupo) si queremos que la mayoría tenga
-    //             exactamente ese tamaño. Optamos por el segundo (más
-    //             cercano al pedido del docente).
-    const numGrupos = Math.max(1, Math.round(N / P.tamGrupo));
-    const tamMin = Math.floor(N / numGrupos);
-    const tamMax = Math.ceil(N / numGrupos);
-    // Cap superior efectivo durante el greedy (deja flexibilidad si el
-    // docente desactivó la opción estricta).
-    const capInsercion = P.tamanoEstricto ? tamMax : tamMax + 1;
+    // --- Fase 2: determinar número y tamaños de grupos ---
+    // Si llega `tamGruposPersonalizados` (array de tamaños) y suma N, lo
+    // usamos tal cual. Cada grupo tiene su capacidad individual.
+    // Si no, calculamos numGrupos a partir de tamGrupo y distribuimos N en
+    // numGrupos lo más uniforme posible.
+    let targetSizes;
+    if (Array.isArray(P.tamGruposPersonalizados) && P.tamGruposPersonalizados.length) {
+      const arr = P.tamGruposPersonalizados.map((n) => Math.max(1, parseInt(n, 10) || 0));
+      const sum = arr.reduce((a, b) => a + b, 0);
+      if (sum === N) targetSizes = arr;
+    }
+    if (!targetSizes) {
+      const numGruposAuto = Math.max(1, Math.round(N / P.tamGrupo));
+      const base = Math.floor(N / numGruposAuto);
+      const extra = N - base * numGruposAuto;
+      targetSizes = new Array(numGruposAuto).fill(base);
+      for (let i = 0; i < extra; i++) targetSizes[i] += 1;
+    }
+    const numGrupos = targetSizes.length;
+    const tamMin = Math.min.apply(null, targetSizes);
+    const tamMax = Math.max.apply(null, targetSizes);
 
     // --- Fase 3: seeds según estrategia ---
     const vulnerabilidad = (k) =>
@@ -233,7 +247,11 @@
       let mejor = -1, mejorScore = -Infinity;
       for (let g = 0; g < grupos.length; g++) {
         const G = grupos[g];
-        if (G.miembros.length >= capInsercion) continue;
+        // Cap individual: cada grupo tiene su tamaño objetivo. Si el modo no
+        // es estricto, dejamos un margen de +1 para que el greedy tenga
+        // flexibilidad y la fase de balanceo termina de acomodarlo.
+        const cap = P.tamanoEstricto ? targetSizes[g] : targetSizes[g] + 1;
+        if (G.miembros.length >= cap) continue;
         if (!P.permitirRojoMutuo && violaRojoMutuo(cand, G.miembros, score)) continue;
         const s = scoreInsercion(cand, G.miembros, pares, score, P, {
           esLider, esApoyo, popularidad, tag,
@@ -241,58 +259,41 @@
         if (s > mejorScore) { mejorScore = s; mejor = g; }
       }
       if (mejor === -1) {
-        // Fallback: grupo más chico ignorando restricciones duras.
+        // Fallback: grupo con más espacio libre ignorando restricciones duras.
         mejor = 0;
+        let masEspacio = targetSizes[0] - grupos[0].miembros.length;
         for (let g = 1; g < grupos.length; g++) {
-          if (grupos[g].miembros.length < grupos[mejor].miembros.length) mejor = g;
+          const espacio = targetSizes[g] - grupos[g].miembros.length;
+          if (espacio > masEspacio) { masEspacio = espacio; mejor = g; }
         }
       }
       grupos[mejor].miembros.push(cand);
     }
 
     // --- Fase 4.5: balanceo estricto de tamaños ---
-    // Después del greedy puede haber grupos por debajo de tamMin (si nadie
-    // quiso entrar ahí) o por arriba de tamMax. Movemos miembros desde los
-    // sobre-llenos hacia los sub-llenos, eligiendo en el grupo donante al
-    // miembro con peor fit (menor aporte al grupo) y en el grupo receptor
-    // posicionándolo siempre que no rompa el rojo-mutuo.
+    // Cada grupo debe terminar con exactamente targetSizes[g] miembros.
+    // Movemos miembros desde grupos sobre-llenos a grupos sub-llenos,
+    // eligiendo en el donador al miembro con peor fit (menor aporte al
+    // grupo).
     if (P.tamanoEstricto) {
       let moves = 0, maxMoves = N * 2;
       while (moves++ < maxMoves) {
-        const sobre = grupos.filter(g => g.miembros.length > tamMax);
-        const sub   = grupos.filter(g => g.miembros.length < tamMin);
+        const sobre = [], sub = [];
+        for (let i = 0; i < grupos.length; i++) {
+          const diff = grupos[i].miembros.length - targetSizes[i];
+          if (diff > 0) sobre.push({ idx: i, diff });
+          else if (diff < 0) sub.push({ idx: i, diff });
+        }
         if (!sobre.length && !sub.length) break;
-        // Si hay grupos por arriba y por debajo, transferir 1 miembro.
-        if (sobre.length && sub.length) {
-          const donador = sobre[0];
-          const receptor = sub[0];
-          const m = peorMiembroParaGrupo(donador.miembros, pares);
-          donador.miembros = donador.miembros.filter(x => x !== m);
-          receptor.miembros.push(m);
-          continue;
-        }
-        // Sólo hay grupos sub-llenos (algún seed quedó casi vacío). Tomamos
-        // del grupo que tenga > tamMin (no excede tamMax) un miembro.
-        if (sub.length) {
-          const donador = grupos
-            .filter(g => g.miembros.length > tamMin)
-            .sort((a, b) => b.miembros.length - a.miembros.length)[0];
-          if (!donador) break;
-          const m = peorMiembroParaGrupo(donador.miembros, pares);
-          donador.miembros = donador.miembros.filter(x => x !== m);
-          sub[0].miembros.push(m);
-          continue;
-        }
-        // Sólo hay grupos sobre-llenos (raro). Mover a otro con margen.
-        if (sobre.length) {
-          const receptor = grupos
-            .filter(g => g.miembros.length < tamMax)
-            .sort((a, b) => a.miembros.length - b.miembros.length)[0];
-          if (!receptor) break;
-          const m = peorMiembroParaGrupo(sobre[0].miembros, pares);
-          sobre[0].miembros = sobre[0].miembros.filter(x => x !== m);
-          receptor.miembros.push(m);
-        }
+        if (!sobre.length || !sub.length) break; // no debería pasar (suma ya cuadra)
+        // Tomamos el más excedido y el más faltante.
+        sobre.sort((a, b) => b.diff - a.diff);
+        sub.sort((a, b) => a.diff - b.diff);
+        const donador = grupos[sobre[0].idx];
+        const receptor = grupos[sub[0].idx];
+        const m = peorMiembroParaGrupo(donador.miembros, pares);
+        donador.miembros = donador.miembros.filter((x) => x !== m);
+        receptor.miembros.push(m);
       }
     }
 
@@ -419,8 +420,9 @@
         tamanos: gruposOut.map((g) => g.codigos.length),
         tamGrupoPedido: P.tamGrupo,
         tamMin, tamMax, numGrupos,
-        // ¿Quedó algún grupo fuera del rango pedido?
-        respetaTamanio: gruposOut.every(g => g.codigos.length >= tamMin && g.codigos.length <= tamMax),
+        targetSizes: targetSizes.slice(),
+        // ¿Cada grupo quedó con su tamaño objetivo exacto?
+        respetaTamanio: gruposOut.every((g, i) => g.codigos.length === targetSizes[i]),
       },
       pares,
       estudiantes: students,
@@ -573,5 +575,41 @@
     G2.miembros.push(a);
   }
 
-  window.GROUPS = { formarGrupos };
+  // Sugiere 3-4 distribuciones razonables de tamaños para N alumnos dado
+  // un tamaño preferido. Devuelve un array de { tamanios:[...], etiqueta:"" }
+  // con tamaños siempre >= 2 y suma exacta = N. Las distribuciones se
+  // ordenan por "cercanía al tamaño preferido" (menor varianza primero).
+  function sugerirDistribuciones(N, tamPreferido) {
+    if (!N || N < 2) return [];
+    const t = Math.max(2, Math.min(8, parseInt(tamPreferido, 10) || 4));
+    const visto = new Set();
+    const out = [];
+
+    const distribuir = (numGrupos, etiqueta) => {
+      if (numGrupos < 1 || numGrupos > Math.floor(N / 2)) return;
+      const base = Math.floor(N / numGrupos);
+      const extra = N - base * numGrupos;
+      if (base < 2) return;
+      const arr = new Array(numGrupos).fill(base);
+      for (let i = 0; i < extra; i++) arr[i] += 1;
+      const sorted = arr.slice().sort((a, b) => b - a);
+      const key = sorted.join(",");
+      if (visto.has(key)) return;
+      visto.add(key);
+      const variance = sorted.reduce((s, n) => s + Math.pow(n - t, 2), 0) / sorted.length;
+      out.push({ tamanios: sorted, etiqueta, numGrupos, variance });
+    };
+
+    const ideal = Math.max(1, Math.round(N / t));
+    distribuir(ideal,         "tamaño preferido");
+    distribuir(Math.ceil(N / t),  "más grupos · más chicos");
+    distribuir(Math.floor(N / t), "menos grupos · más grandes");
+    distribuir(ideal + 1,     "uno más");
+    distribuir(ideal - 1,     "uno menos");
+
+    out.sort((a, b) => a.variance - b.variance);
+    return out.slice(0, 4).map(({ tamanios, etiqueta, numGrupos }) => ({ tamanios, etiqueta, numGrupos }));
+  }
+
+  window.GROUPS = { formarGrupos, sugerirDistribuciones };
 })();
