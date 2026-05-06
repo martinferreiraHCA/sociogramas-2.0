@@ -111,6 +111,9 @@
     return await getJSON("grupos", p);
   }
   async function fetchClases(idToken) { return await getJSON("clases", { id_token: idToken }); }
+  async function fetchFotosClase(idToken, clase) {
+    return await getJSON("fotos_clase", { id_token: idToken, clase });
+  }
   async function fetchEstudiantes(idToken, clase) {
     const p = { id_token: idToken };
     if (clase) p.clase = clase;
@@ -239,6 +242,7 @@
     fetchCompletados,
     fetchGrupos,
     fetchClases,
+    fetchFotosClase,
     fetchEstudiantes,
     saveGrupos,
     crearClase,
