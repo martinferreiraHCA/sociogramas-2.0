@@ -118,6 +118,11 @@
   let opciones = [];         // [{numero_pregunta, orden, texto}]
   let respuestas = [];       // del Sheet: [{timestamp, codigo, nombre, clase, numero_pregunta, texto_pregunta, evaluado_codigo, evaluado_nombre, opcion_texto, otro_texto}]
   let completados = [];
+  // Map codigo → file_id de Drive con la foto del alumno. Se carga
+  // (silencioso, opcional) cuando hay una clase seleccionada. Si la
+  // función de fotos no está configurada o el endpoint falla, queda
+  // vacío y todo cae a avatares con iniciales.
+  let fotosPorCodigo = {};
   let clases = [];           // [clase identifier, ...]
   let claseSel = U.getQueryParam("clase") || "";
 
@@ -156,6 +161,78 @@
     draftActivo = false;
   }
 
+  // ---- Fotos de los estudiantes (opcional) ----
+  // Carga el map codigo → file_id desde el backend y re-renderiza sólo si
+  // efectivamente vino algo, para no sobreescribir el render con el mismo
+  // estado vacío. Es silenciosa: si el endpoint falla o no hay fotos
+  // configuradas, no se muestra error.
+  async function cargarFotosClase(clase) {
+    if (!clase) return;
+    try {
+      const r = await API.fetchFotosClase(pw, clase);
+      if (!r || !r.ok) {
+        console.info("[fotos] respuesta no ok:", r);
+        return;
+      }
+      const next = {};
+      (r.fotos || []).forEach((f) => {
+        if (f && f.codigo && f.file_id) next[String(f.codigo).trim()] = f.file_id;
+      });
+      const cambio = JSON.stringify(next) !== JSON.stringify(fotosPorCodigo);
+      fotosPorCodigo = next;
+      const total = Object.keys(next).length;
+      console.info(`[fotos] cargadas ${total} fotos para clase "${clase}" (reason=${r.reason || "ok"})`);
+      // Re-render para que los avatares aparezcan (si ya había render).
+      if (cambio && document.querySelector("#dashboard-root .panel-container")) {
+        render();
+      }
+    } catch (err) {
+      console.info("[fotos] error de red (no bloqueante):", err);
+    }
+  }
+
+  // URL pública del thumbnail de Drive. `sz=w240` da una imagen razonable
+  // tanto para el sociograma (60-100px) como para las tarjetas (40-60px).
+  function urlFoto(codigo, size) {
+    const id = fotosPorCodigo[String(codigo).trim()];
+    if (!id) return null;
+    const w = Math.max(60, Math.min(800, parseInt(size, 10) || 240));
+    return `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w${w}`;
+  }
+
+  // Iniciales (máx 2) y un color HSL estable derivado del código del
+  // alumno, para que el avatar fallback sea consistente entre renders.
+  function inicialesDe(nombre) {
+    const partes = String(nombre || "").trim().split(/\s+/).filter(Boolean);
+    if (!partes.length) return "·";
+    if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
+    return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+  }
+  function colorAvatar(codigo) {
+    let h = 0;
+    const s = String(codigo || "");
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return `hsl(${h}, 55%, 55%)`;
+  }
+  // Devuelve HTML de un avatar circular: imagen si hay foto, círculo con
+  // iniciales si no. Tamaño por default 48px.
+  function avatarHTML(estudiante, size) {
+    const px = parseInt(size, 10) || 48;
+    const url = urlFoto(estudiante.codigo, px * 2);
+    if (url) {
+      return `<img class="avatar-img" src="${U.escapeHtml(url)}" alt="${U.escapeHtml(estudiante.nombre)}" `
+           + `style="width:${px}px;height:${px}px" loading="lazy" `
+           + `onerror="this.outerHTML=this.dataset.fallback" `
+           + `data-fallback='${avatarFallbackHTML(estudiante, px).replace(/'/g, "&apos;")}' />`;
+    }
+    return avatarFallbackHTML(estudiante, px);
+  }
+  function avatarFallbackHTML(estudiante, px) {
+    const c = colorAvatar(estudiante.codigo);
+    const initials = U.escapeHtml(inicialesDe(estudiante.nombre));
+    return `<span class="avatar-fallback" style="width:${px}px;height:${px}px;background:${c};font-size:${Math.round(px*0.42)}px">${initials}</span>`;
+  }
+
   init().catch(err => {
     console.error(err);
     root.innerHTML = `<div class="panel-container"><p class="cuestionario-error">Error cargando el dashboard. Revisá la consola.</p></div>`;
@@ -187,6 +264,7 @@
     clases = Array.from(new Set(estudiantes.map(e => e.clase))).sort();
 
     if (!claseSel && clases.length === 1) claseSel = clases[0];
+    if (claseSel) cargarFotosClase(claseSel); // disparo en background (silencioso)
     if (claseSel) {
       const servidor = gruposParaClase(grupos, claseSel);
       if (servidor && servidor.length) {
@@ -1407,6 +1485,21 @@
     });
 
     const codigosCompl = new Set(completados.map(c => String(c.codigo).trim()));
+
+    // Para cada nodo con foto disponible, definimos un <pattern> circular
+    // con la imagen del alumno. Si no tiene foto, el nodo cae al gradiente
+    // por defecto (verde si completó, gris si no).
+    const defsForFotos = svg.querySelector("defs");
+    ests.forEach(e => {
+      const url = urlFoto(e.codigo, 240);
+      if (!url) return;
+      const r = radio(e.codigo);
+      defsForFotos.insertAdjacentHTML("beforeend", `
+        <pattern id="foto-${U.escapeHtml(e.codigo)}" patternUnits="objectBoundingBox" width="1" height="1">
+          <image href="${U.escapeHtml(url)}" x="0" y="0" width="${r*2}" height="${r*2}" preserveAspectRatio="xMidYMid slice"/>
+        </pattern>`);
+    });
+
     ests.forEach(e => {
       const p = pos[e.codigo];
       const g = document.createElementNS(svgNS, "g");
@@ -1421,11 +1514,16 @@
       halo.setAttribute("fill", "none");
       g.appendChild(halo);
 
+      const tieneFoto = !!urlFoto(e.codigo);
       const circle = document.createElementNS(svgNS, "circle");
       circle.setAttribute("r", radio(e.codigo));
-      circle.setAttribute("fill", codigosCompl.has(e.codigo) ? "url(#node-grad)" : "#bdbdbd");
-      circle.setAttribute("stroke", "#fff");
-      circle.setAttribute("stroke-width", "2.5");
+      // Con foto: relleno con la imagen. Sin foto: gradiente verde si
+      // completó, gris si no.
+      circle.setAttribute("fill",
+        tieneFoto ? `url(#foto-${e.codigo})`
+                  : (codigosCompl.has(e.codigo) ? "url(#node-grad)" : "#bdbdbd"));
+      circle.setAttribute("stroke", codigosCompl.has(e.codigo) ? "#2e7d32" : "#bdbdbd");
+      circle.setAttribute("stroke-width", tieneFoto ? "2.5" : "2.5");
       g.appendChild(circle);
 
       const txt = document.createElementNS(svgNS, "text");
@@ -1437,16 +1535,40 @@
       txt.textContent = primerNombre(e.nombre);
       g.appendChild(txt);
 
+      // Badge de verdes recibidos: si hay foto, lo movemos arriba-derecha
+      // para no taparla. Si no hay foto, se mantiene en el centro como antes.
       const countVerdes = stats[e.codigo].in.verde;
       if (countVerdes > 0) {
-        const badge = document.createElementNS(svgNS, "text");
-        badge.setAttribute("text-anchor", "middle");
-        badge.setAttribute("font-size", "11");
-        badge.setAttribute("font-weight", "700");
-        badge.setAttribute("fill", "#fff");
-        badge.setAttribute("y", "4");
-        badge.textContent = String(countVerdes);
-        g.appendChild(badge);
+        const r = radio(e.codigo);
+        if (tieneFoto) {
+          // Círculo de fondo + texto, esquina superior derecha del nodo.
+          const bgBadge = document.createElementNS(svgNS, "circle");
+          bgBadge.setAttribute("cx", r * 0.7);
+          bgBadge.setAttribute("cy", -r * 0.7);
+          bgBadge.setAttribute("r", "9");
+          bgBadge.setAttribute("fill", "#2e7d32");
+          bgBadge.setAttribute("stroke", "#fff");
+          bgBadge.setAttribute("stroke-width", "1.5");
+          g.appendChild(bgBadge);
+          const badge = document.createElementNS(svgNS, "text");
+          badge.setAttribute("text-anchor", "middle");
+          badge.setAttribute("font-size", "10");
+          badge.setAttribute("font-weight", "700");
+          badge.setAttribute("fill", "#fff");
+          badge.setAttribute("x", r * 0.7);
+          badge.setAttribute("y", -r * 0.7 + 3);
+          badge.textContent = String(countVerdes);
+          g.appendChild(badge);
+        } else {
+          const badge = document.createElementNS(svgNS, "text");
+          badge.setAttribute("text-anchor", "middle");
+          badge.setAttribute("font-size", "11");
+          badge.setAttribute("font-weight", "700");
+          badge.setAttribute("fill", "#fff");
+          badge.setAttribute("y", "4");
+          badge.textContent = String(countVerdes);
+          g.appendChild(badge);
+        }
       }
 
       svg.appendChild(g);
@@ -1585,8 +1707,11 @@
     const recibeDe = (k) => quienes.filter(q => q.k === k).map(q => q.nombre);
     return `
       <div class="socio-panel-head">
-        <div class="socio-panel-nombre">${U.escapeHtml(e.nombre)}</div>
-        <div class="muted">Código: <code>${U.escapeHtml(e.codigo)}</code></div>
+        <div class="socio-panel-avatar">${avatarHTML(e, 64)}</div>
+        <div class="socio-panel-info">
+          <div class="socio-panel-nombre">${U.escapeHtml(e.nombre)}</div>
+          <div class="muted">Código: <code>${U.escapeHtml(e.codigo)}</code></div>
+        </div>
       </div>
       <h5 class="socio-panel-title">📥 Lo que recibe</h5>
       <div class="chip-row">${statChipsHTML(st.in) || '<span class="muted">aún sin datos</span>'}</div>
@@ -1724,7 +1849,8 @@
       const completo = codigosCompl.has(e.codigo);
       card.innerHTML = `
         <div class="detalle-card-head">
-          <div>
+          <div class="detalle-card-avatar">${avatarHTML(e, 48)}</div>
+          <div class="detalle-card-info">
             <div class="detalle-card-nombre">${U.escapeHtml(e.nombre)}</div>
             <div class="muted">${U.escapeHtml(e.codigo)} · ${completo ? '✓ completó' : 'pendiente'}</div>
           </div>

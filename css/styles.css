@@ -908,9 +908,12 @@ table.data-table tbody tr:hover { background: #fafafa; }
   align-self: stretch;
 }
 .socio-panel-head {
+  display: flex; align-items: center; gap: 12px;
   font-size: 1.1em; font-weight: 600; color: #333;
   margin-bottom: 8px;
 }
+.socio-panel-avatar { flex: 0 0 auto; }
+.socio-panel-info { flex: 1 1 auto; min-width: 0; }
 .socio-panel-nombre {
   color: #1976d2;
 }
@@ -970,7 +973,12 @@ table.data-table tbody tr:hover { background: #fafafa; }
   box-shadow: 0 4px 14px rgba(0,0,0,0.08);
 }
 .detalle-card-head {
-  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+}
+.detalle-card-avatar { flex: 0 0 auto; }
+.detalle-card-info { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.detalle-card-info > .muted {
+  text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
 }
 .detalle-card-nombre { font-weight: 600; color: #333; }
 .detalle-card-score {
@@ -1582,4 +1590,28 @@ table.data-table tbody tr:hover { background: #fafafa; }
   text-align: right;
   font-size: 0.92em;
   color: #333;
+}
+
+/* Avatares de estudiantes (foto de Drive o iniciales fallback) */
+.avatar-img {
+  display: inline-block;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #e9ecef;
+  vertical-align: middle;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  user-select: none;
 }

@@ -32,6 +32,8 @@
  *     ?action=respuestas&id_token=...                 → hoja `respuestas`
  *     ?action=completados&id_token=...                → hoja `completados`
  *     ?action=grupos&id_token=...[&clase=]            → grupos guardados
+ *     ?action=fotos_clase&id_token=...&clase=...      → fotos de la clase
+ *                                                       (lee Drive, opcional)
  *
  * Después de cambiar este archivo: "Implementar → Administrar
  * implementaciones → editar → Versión nueva".
@@ -48,6 +50,15 @@ const CONFIG = {
   GOOGLE_CLIENT_ID: "1096411533432-sdaj35tq8q0gvq0sir5k008ru59b6sfa.apps.googleusercontent.com",
   // Sólo usuarios con email @ADMIN_DOMAIN pueden ejecutar acciones admin.
   ADMIN_DOMAIN: "hca.edu.uy",
+  // ID de la carpeta de Drive con las fotos de los estudiantes. Estructura
+  // esperada: <FOTOS_FOLDER_ID>/<nombre_de_la_clase>/<archivos>. Cada
+  // archivo debe terminar con _<cedula>.<ext> (ej. ALBINI_CABRAL_Tomas_60094744.jpg).
+  // Dejar vacío para desactivar la función de fotos: el sistema cae a
+  // avatares con iniciales sin error.
+  // La cuenta dueña del Apps Script tiene que tener acceso de lectura a
+  // esta carpeta. La primera vez que se llame `fotos_clase`, Apps Script
+  // va a pedir autorización del scope Drive readonly.
+  FOTOS_FOLDER_ID: "1SgBNVimK62gXsXJEcqZtJW4hk6QoxF6L",
 };
 
 const HOJA_RESPUESTAS = "respuestas";
@@ -585,6 +596,9 @@ function doGet(e) {
       if (params.clase) data = data.filter((g) => String(g.clase || "").trim() === String(params.clase).trim());
       return jsonResponse({ ok: true, data });
     }
+    if (action === "fotos_clase") {
+      return fotosClase(String(params.clase || "").trim());
+    }
     return jsonResponse({ ok: false, error: "accion_desconocida" });
   } catch (err) {
     console.error(err);
@@ -771,6 +785,68 @@ function hojaToObjects(hoja) {
     out.push(row);
   }
   return out;
+}
+
+// Lista las fotos de los estudiantes de una clase. Estructura esperada en
+// Drive: <FOTOS_FOLDER_ID>/<nombre_clase>/<archivos>. El nombre del archivo
+// debe terminar con `_<cedula>.<ext>` (ej. ALBINI_CABRAL_Tomas_60094744.jpg).
+// Devuelve un map codigo → file_id que el frontend usa para construir
+// thumbnail URLs de Drive. Cachea 10 min para no listar Drive en cada
+// carga.
+//
+// Si FOTOS_FOLDER_ID no está configurado, la subcarpeta no existe, o
+// alguno de los pasos falla, devuelve `{ok: true, fotos: [], reason: ...}`
+// — el frontend cae transparentemente a avatares con iniciales.
+function fotosClase(clase) {
+  if (!clase) return jsonResponse({ ok: true, fotos: [], reason: "clase_vacia" });
+  if (!CONFIG.FOTOS_FOLDER_ID) return jsonResponse({ ok: true, fotos: [], reason: "fotos_no_configuradas" });
+
+  const cache = CacheService.getScriptCache();
+  const cacheKey = "fotos:" + clase;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try { return jsonResponse(JSON.parse(cached)); } catch (e) { /* recompute */ }
+  }
+
+  let folder;
+  try {
+    folder = DriveApp.getFolderById(CONFIG.FOTOS_FOLDER_ID);
+  } catch (e) {
+    console.warn("fotos_clase: no se puede abrir FOTOS_FOLDER_ID", e);
+    return jsonResponse({ ok: true, fotos: [], reason: "folder_inaccesible" });
+  }
+
+  // Buscar la subcarpeta cuyo nombre coincida con `clase` (case-insensitive,
+  // ignora espacios duplicados).
+  const norm = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const claseNorm = norm(clase);
+  let subfolder = null;
+  const it = folder.getFolders();
+  while (it.hasNext()) {
+    const f = it.next();
+    if (norm(f.getName()) === claseNorm) { subfolder = f; break; }
+  }
+  if (!subfolder) {
+    const out = { ok: true, fotos: [], reason: "subcarpeta_no_existe" };
+    cache.put(cacheKey, JSON.stringify(out), 60); // cache corto: el docente puede crear la carpeta
+    return jsonResponse(out);
+  }
+
+  // Listar archivos. Extraer la cédula del nombre: último número de
+  // 6-9 dígitos antes de la extensión.
+  const re = /_(\d{6,9})\.(jpg|jpeg|png|webp|gif)$/i;
+  const fotos = [];
+  const archivos = subfolder.getFiles();
+  while (archivos.hasNext()) {
+    const f = archivos.next();
+    const m = re.exec(f.getName());
+    if (!m) continue;
+    fotos.push({ codigo: m[1], file_id: f.getId(), file_name: f.getName() });
+  }
+
+  const out = { ok: true, fotos, clase, subcarpeta: subfolder.getName() };
+  cache.put(cacheKey, JSON.stringify(out), 600); // 10 min
+  return jsonResponse(out);
 }
 
 function yaCompleto(hojaCompl, codigo) {
