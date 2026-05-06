@@ -395,6 +395,77 @@ table.data-table tbody tr:hover { background: #fafafa; }
   margin-top: 12px;
 }
 
+/* Editor de tamaños personalizados */
+.tam-custom-editor {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 12px;
+}
+.tam-custom-head {
+  margin-bottom: 12px;
+  font-size: 0.92em;
+}
+.tam-custom-suges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.tam-custom-suges .tam-sug {
+  font-family: monospace;
+}
+.tam-custom-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.tam-custom-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+.tam-custom-label {
+  font-size: 0.85em;
+  color: #555;
+  white-space: nowrap;
+}
+.tam-custom-input {
+  width: 50px;
+  padding: 4px 6px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  text-align: center;
+  font-size: 0.95em;
+}
+.tam-custom-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.tam-custom-suma {
+  font-size: 0.92em;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.tam-custom-suma.ok {
+  background: #f3fbf4;
+  color: #2e7d32;
+}
+.tam-custom-suma.err {
+  background: #fdeeee;
+  color: #c62828;
+  font-weight: 500;
+}
+
 /* Stats de compatibilidad del curso */
 .grupos-stats-title { margin-bottom: 10px; font-size: 1em; color: #333; }
 .grupos-stats-grid {
