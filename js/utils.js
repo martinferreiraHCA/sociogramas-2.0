@@ -226,6 +226,55 @@
     return { headerIdx, rows: out };
   }
 
+  // Parser de un CSV "simple" cargado por el docente. Acepta las tres
+  // columnas Nombre / Cédula / Fecha de Nacimiento (con varios alias)
+  // y devuelve filas listas para `importarEstudiantes`. La detección de
+  // encabezados es flexible: encontramos la primera fila que contenga al
+  // menos un alias de "nombre" y uno de "cédula".
+  function parseRosterSimple(csvText) {
+    const rows = parseCSV(csvText);
+    if (!rows.length) return { headerIdx: -1, rows: [], error: "csv_vacio" };
+
+    const ALIAS_NOMBRE = ["nombre completo", "nombre y apellido", "nombre", "alumno", "estudiante", "apellido y nombre", "apellidos y nombre"];
+    const ALIAS_CEDULA = ["cédula", "cedula", "ci", "dni", "documento", "número de documento", "numero de documento", "documento de identidad", "doc"];
+    const ALIAS_FECHA  = ["fecha de nacimiento", "fecha nacimiento", "fecha de nac.", "fecha nac.", "f. nacimiento", "f.nacimiento", "nacimiento", "fnac"];
+
+    let headerIdx = -1, headers = [], iN = -1, iC = -1, iF = -1;
+    for (let h = 0; h < Math.min(10, rows.length); h++) {
+      const r = rows[h].map(c => (c || "").trim().toLowerCase());
+      const findAlias = (alias) => {
+        for (const a of alias) { const i = r.indexOf(a); if (i >= 0) return i; }
+        return -1;
+      };
+      const _iN = findAlias(ALIAS_NOMBRE);
+      const _iC = findAlias(ALIAS_CEDULA);
+      if (_iN >= 0 && _iC >= 0) {
+        headerIdx = h; headers = r;
+        iN = _iN; iC = _iC; iF = findAlias(ALIAS_FECHA);
+        break;
+      }
+    }
+    if (headerIdx < 0) {
+      return { headerIdx: -1, rows: [], error: "Necesito encabezados con al menos 'Nombre' y 'Cédula'." };
+    }
+
+    const out = [];
+    const vistos = new Set();
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.every(c => !String(c || "").trim())) continue;
+      const nombre = String(row[iN] || "").trim();
+      const cedRaw = String(row[iC] || "").trim();
+      const codigo = /^\d/.test(cedRaw) ? cedRaw.replace(/\D/g, "") : cedRaw.replace(/\s+/g, "");
+      if (!nombre || !codigo) continue;
+      if (vistos.has(codigo)) continue;
+      vistos.add(codigo);
+      const fechaNac = iF >= 0 ? normalizarFechaNac(row[iF]) : "";
+      out.push({ codigo, nombre, fechaNac });
+    }
+    return { headerIdx, rows: out };
+  }
+
   // Normaliza una fecha de nacimiento al formato DD/MM/AAAA. Acepta entradas
   // como "2010-03-21", "21/3/2010", "21-03-10", etc. Si no parsea, devuelve
   // el string limpio para no perder el dato.
@@ -269,6 +318,6 @@
     $, $$, el,
     parseCSV, csvToObjects, objectsToCSV, downloadFile,
     getQueryParam, escapeHtml, colorOpcionAfinidad,
-    parseRosterEscolar, titleCase, normalizarFechaNac,
+    parseRosterEscolar, parseRosterSimple, titleCase, normalizarFechaNac,
   };
 })();

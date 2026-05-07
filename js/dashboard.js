@@ -319,6 +319,7 @@
     root.appendChild(renderRanking(esClase, resp));
     root.appendChild(wrapId("paso-respuestas", renderDetalle(esClase, resp)));
     root.appendChild(wrapId("paso-grupos", renderGrupos(esClase, resp)));
+    root.appendChild(wrapId("paso-reportes", renderReportes(esClase, resp)));
     root.appendChild(wrapId("paso-exportar", renderExportar(esClase)));
   }
 
@@ -423,10 +424,12 @@
           <h3>Empezá subiendo el CSV del colegio</h3>
           <p class="muted">El sistema detecta cada curso y grupo (ej. <b>8°1</b>, <b>8°2</b>), crea un tab por cada uno en la planilla y usa las cédulas como código. No hace falta crear clases a mano.</p>
           <div class="flex-row" style="justify-content:center;gap:10px;margin-top:18px;flex-wrap:wrap">
-            <button class="btn btn-green" id="btn-landing-importar">📥 Subir CSV del colegio</button>
+            <button class="btn btn-green" id="btn-landing-importar">Subir CSV del colegio</button>
+            <button class="btn btn-blue" id="btn-landing-simple">Subir datos de alumnos (CSV simple)</button>
             <button class="btn btn-gray" id="btn-landing-manual">o crear una clase vacía a mano</button>
           </div>
           <input type="file" id="file-landing" accept=".csv,text/csv" style="display:none" />
+          <input type="file" id="file-landing-simple" accept=".csv,text/csv" style="display:none" />
         </div>`;
     } else {
       // Hay clases: mostrar listado + opción de subir otro CSV.
@@ -434,9 +437,11 @@
         <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
           <h3>Seleccioná una clase</h3>
           <div class="flex-row" style="gap:8px;flex-wrap:wrap">
-            <button class="btn btn-green btn-sm" id="btn-landing-importar">📥 Importar otro CSV</button>
+            <button class="btn btn-green btn-sm" id="btn-landing-importar">Importar CSV escolar</button>
+            <button class="btn btn-blue btn-sm" id="btn-landing-simple">Subir datos de alumnos</button>
             <button class="btn btn-gray btn-sm" id="btn-landing-manual">+ Nueva clase vacía</button>
             <input type="file" id="file-landing" accept=".csv,text/csv" style="display:none" />
+            <input type="file" id="file-landing-simple" accept=".csv,text/csv" style="display:none" />
           </div>
         </div>`;
       const list = el("div", { class: "list-card mt-16" });
@@ -482,7 +487,52 @@
       reader.readAsText(f, "utf-8");
     });
 
+    const btnSimple = c.querySelector("#btn-landing-simple");
+    const fiSimple = c.querySelector("#file-landing-simple");
+    if (btnSimple && fiSimple) btnSimple.addEventListener("click", () => fiSimple.click());
+    if (fiSimple) fiSimple.addEventListener("change", manejarUploadSimple);
+
     return c;
+  }
+
+  // Maneja la carga de un CSV "simple" (Nombre / Cédula / Fecha de Nacimiento).
+  // Convierte cada fila al shape que espera abrirModalImportar y abre el mismo
+  // modal de confirmación, así el docente reusa el flujo conocido.
+  function manejarUploadSimple(ev) {
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = U.parseRosterSimple(String(reader.result || ""));
+        if (parsed.error) {
+          U.toast("No se puede importar: " + parsed.error, "error");
+          return;
+        }
+        if (!parsed.rows.length) {
+          U.toast("El CSV no tiene filas válidas (¿faltan Nombre/Cédula?)", "error");
+          return;
+        }
+        // Enriquecer al shape de parseRosterEscolar para reutilizar el modal.
+        const filas = parsed.rows.map((r) => ({
+          codigo: r.codigo,
+          nombre: r.nombre,
+          fechaNac: r.fechaNac || "",
+          curso: "",
+          grupo: "",
+          tipoDoc: "",
+          conPase: "",
+          activo: true,
+        }));
+        const estsActuales = claseSel ? estudiantes.filter((e) => e.clase === claseSel) : [];
+        abrirModalImportar(filas, estsActuales);
+      } catch (err) {
+        console.error("parseRosterSimple error", err);
+        U.toast("No se pudo leer el CSV: " + err.message, "error");
+      }
+    };
+    reader.readAsText(f, "utf-8");
   }
 
   async function nuevaClasePrompt() {
@@ -555,25 +605,29 @@
         <div class="empty-hero mt-16">
           <div class="empty-hero-emoji">📥</div>
           <h3>La clase <b>${U.escapeHtml(claseSel)}</b> todavía no tiene alumnos</h3>
-          <p class="muted">Subí el CSV del colegio y el sistema usa las cédulas como código, separando por curso y grupo (8°1, 8°2, ...).</p>
+          <p class="muted">Subí los datos en cualquiera de estos formatos. Las cédulas se usan como código.</p>
           <div class="flex-row" style="justify-content:center;gap:10px;margin-top:18px;flex-wrap:wrap">
-            <button class="btn btn-green" id="btn-importar-csv">📥 Importar CSV del colegio</button>
+            <button class="btn btn-green" id="btn-importar-csv">Importar CSV del colegio</button>
+            <button class="btn btn-blue" id="btn-importar-simple">Subir datos de alumnos (CSV simple)</button>
             <button class="btn btn-gray" id="btn-add-est">+ Agregar manualmente</button>
           </div>
           <input type="file" id="file-roster" accept=".csv,text/csv" style="display:none" />
+          <input type="file" id="file-roster-simple" accept=".csv,text/csv" style="display:none" />
         </div>`;
     } else {
       c.innerHTML = `
         <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
           <h3>1 · Alumnos y códigos <span class="muted" style="font-weight:400">· ${ests.length}</span></h3>
           <div class="flex-row" style="gap:8px;flex-wrap:wrap">
-            <button class="btn btn-green btn-sm" id="btn-importar-csv">📥 Importar CSV</button>
+            <button class="btn btn-green btn-sm" id="btn-importar-csv">Importar CSV escolar</button>
+            <button class="btn btn-blue btn-sm" id="btn-importar-simple">Subir datos de alumnos</button>
             <button class="btn btn-blue btn-sm" id="btn-gen-codigos" ${sinCodigo ? "" : "disabled"}>
-              🔑 Generar códigos${sinCodigo ? ` (${sinCodigo})` : ""}
+              Generar códigos${sinCodigo ? ` (${sinCodigo})` : ""}
             </button>
             <button class="btn btn-gray btn-sm" id="btn-add-est">+ Agregar</button>
-            <button class="btn btn-gray btn-sm" id="btn-copy-codigos">📋 Copiar CSV</button>
+            <button class="btn btn-gray btn-sm" id="btn-copy-codigos">Copiar CSV</button>
             <input type="file" id="file-roster" accept=".csv,text/csv" style="display:none" />
+            <input type="file" id="file-roster-simple" accept=".csv,text/csv" style="display:none" />
           </div>
         </div>
         <p class="muted mt-16">Planilla · tab <b>${U.escapeHtml(claseSel)}</b>. Las cédulas se usan como código. Podés importar el CSV institucional o generar códigos random para los alumnos que no tengan.</p>
@@ -674,6 +728,10 @@
         .join("\n");
       navigator.clipboard.writeText(csv).then(() => U.toast("Copiado al portapapeles", "success"));
     });
+
+    const fileSimple = c.querySelector("#file-roster-simple");
+    on("#btn-importar-simple", "click", () => fileSimple && fileSimple.click());
+    if (fileSimple) fileSimple.addEventListener("change", manejarUploadSimple);
 
     const fileInput = c.querySelector("#file-roster");
     on("#btn-importar-csv", "click", () => fileInput && fileInput.click());
@@ -2705,6 +2763,257 @@
     render();
   }
 
+  // ---------- Reportes ----------
+  // Renderiza el panel "4 · Reportes" con cuatro sub-reportes: estadísticas
+  // por pregunta, rankings, fichas por alumno y reporte de grupos. Cada uno
+  // expone un botón "Imprimir" (window.print + @media print) y otro
+  // "Descargar PDF" (html2pdf.js si está disponible, fallback al diálogo de
+  // impresión). El cómputo lo hace REPORTES para no engordar dashboard.js.
+  function renderReportes(ests, resp) {
+    const c = el("div", { class: "panel-container reportes-panel" });
+    const totalRespuestas = (resp || []).length;
+    const codigosCompl = new Set();
+    (resp || []).forEach((r) => codigosCompl.add(String(r.codigo).trim()));
+    const completadosClase = codigosCompl.size;
+
+    c.innerHTML = `
+      <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:flex-end">
+        <div>
+          <h3>4 · Reportes</h3>
+          <p class="muted" style="margin-top:6px">
+            ${ests.length} alumno(s) · ${completadosClase} completaron · ${totalRespuestas} respuesta(s) registradas
+          </p>
+        </div>
+        <div class="flex-row" style="gap:8px;flex-wrap:wrap">
+          <button class="btn btn-gray btn-sm" id="rep-imprimir-todo">Imprimir todos los reportes</button>
+          <button class="btn btn-blue btn-sm" id="rep-pdf-todo">Descargar PDF</button>
+        </div>
+      </div>
+    `;
+
+    if (!ests.length) {
+      c.appendChild(el("p", { class: "muted mt-16" }, "Cargá los alumnos para empezar a generar reportes."));
+      return c;
+    }
+    if (!totalRespuestas) {
+      c.appendChild(el("p", { class: "muted mt-16" }, "Todavía no hay respuestas registradas para esta clase."));
+      return c;
+    }
+
+    const analytics = REPORTES.calcularAnalytics(ests, resp);
+    const tabs = el("div", { class: "rep-tabs" });
+    tabs.innerHTML = `
+      <button class="rep-tab active" data-tab="preguntas">Por pregunta</button>
+      <button class="rep-tab" data-tab="rankings">Rankings</button>
+      <button class="rep-tab" data-tab="fichas">Ficha por alumno</button>
+      <button class="rep-tab" data-tab="grupos">Reporte de grupos</button>
+    `;
+    c.appendChild(tabs);
+
+    const wrap = el("div", { class: "rep-tabs-body", id: "rep-tabs-body" });
+    c.appendChild(wrap);
+
+    const secciones = {
+      preguntas: () => {
+        const stats = REPORTES.statsPreguntas(preguntas, opciones, resp);
+        const node = el("div", { class: "rep-section pdf-section", id: "rep-sec-preguntas" });
+        node.appendChild(barraToolbar("Estadísticas por pregunta", "preguntas"));
+        node.appendChild(REPORTES.renderTablaPreguntas(stats));
+        return node;
+      },
+      rankings: () => {
+        const rk = REPORTES.rankings(ests, analytics);
+        const node = el("div", { class: "rep-section pdf-section", id: "rep-sec-rankings" });
+        node.appendChild(barraToolbar("Rankings y vínculos", "rankings"));
+        node.appendChild(REPORTES.renderRankings(rk));
+        return node;
+      },
+      fichas: () => {
+        const node = el("div", { class: "rep-section pdf-section", id: "rep-sec-fichas" });
+        node.appendChild(barraToolbar("Ficha por alumno", "fichas"));
+        node.appendChild(REPORTES.renderFichas(ests, analytics, preguntas));
+        return node;
+      },
+      grupos: () => {
+        const rep = REPORTES.reporteGrupos(ests, gruposLocal, analytics);
+        const node = el("div", { class: "rep-section pdf-section", id: "rep-sec-grupos" });
+        node.appendChild(barraToolbar("Reporte de grupos", "grupos"));
+        node.appendChild(REPORTES.renderReporteGrupos(rep));
+        return node;
+      },
+    };
+
+    function pintar(tab) {
+      wrap.innerHTML = "";
+      wrap.appendChild(secciones[tab]());
+      tabs.querySelectorAll(".rep-tab").forEach((b) =>
+        b.classList.toggle("active", b.dataset.tab === tab)
+      );
+    }
+
+    tabs.querySelectorAll(".rep-tab").forEach((b) => {
+      b.addEventListener("click", () => pintar(b.dataset.tab));
+    });
+    pintar("preguntas");
+
+    c.querySelector("#rep-imprimir-todo").addEventListener("click", () => imprimirReportesCompletos(ests, resp, analytics));
+    c.querySelector("#rep-pdf-todo").addEventListener("click", () => descargarPDFReportesCompletos(ests, resp, analytics));
+
+    return c;
+  }
+
+  function barraToolbar(titulo, tab) {
+    const bar = el("div", { class: "rep-toolbar" });
+    bar.innerHTML = `
+      <div class="rep-toolbar-titulo">${U.escapeHtml(titulo)}</div>
+      <div class="flex-row" style="gap:6px">
+        <button class="btn btn-gray btn-sm" data-act="imprimir">Imprimir</button>
+        <button class="btn btn-blue btn-sm" data-act="pdf">PDF</button>
+      </div>
+    `;
+    bar.querySelector('[data-act="imprimir"]').addEventListener("click", () => imprimirElemento(`rep-sec-${tab}`, "Reporte"));
+    bar.querySelector('[data-act="pdf"]').addEventListener("click", () => descargarPDFElemento(`rep-sec-${tab}`, `${tab}_${claseSel || "clase"}`));
+    return bar;
+  }
+
+  // ---------- Print / PDF ----------
+  // Estrategia:
+  //   1) "Imprimir" usa window.print() con @media print en CSS para esconder
+  //      el resto del dashboard y maquetar el reporte como hojas.
+  //   2) "Descargar PDF" usa html2pdf.js (CDN). Si la lib no está disponible
+  //      (por ejemplo, sin red), caemos a window.print() y avisamos al usuario.
+  function construirOverlayPrint(nodos) {
+    const overlay = document.createElement("div");
+    overlay.id = "print-area";
+    overlay.innerHTML = `
+      <div class="print-header">
+        <div class="print-titulo">Sociogramas — ${U.escapeHtml(claseSel || "")}</div>
+        <div class="print-meta">${new Date().toLocaleString("es")} · ${U.escapeHtml(adminEmail || "")}</div>
+      </div>
+    `;
+    nodos.forEach((n) => {
+      if (n) overlay.appendChild(n.cloneNode(true));
+    });
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  function descartarOverlayPrint(overlay) {
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    document.body.classList.remove("print-mode");
+  }
+
+  function imprimirElemento(id, _label) {
+    const node = document.getElementById(id);
+    if (!node) { U.toast("No encontré la sección", "error"); return; }
+    const overlay = construirOverlayPrint([node]);
+    document.body.classList.add("print-mode");
+    setTimeout(() => {
+      window.print();
+      descartarOverlayPrint(overlay);
+    }, 50);
+  }
+
+  async function descargarPDFElemento(id, filename) {
+    const node = document.getElementById(id);
+    if (!node) { U.toast("No encontré la sección", "error"); return; }
+    if (typeof window.html2pdf !== "function") {
+      U.toast("Librería PDF no cargada · uso el diálogo de impresión", "warn");
+      imprimirElemento(id);
+      return;
+    }
+    U.toast("Generando PDF…", "info");
+    try {
+      const overlay = construirOverlayPrint([node]);
+      await window.html2pdf().set({
+        margin: [10, 10, 14, 10],
+        filename: `${filename}.pdf`,
+        image: { type: "jpeg", quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        pagebreak: { mode: ["avoid-all", "css", "legacy"] },
+      }).from(overlay).save();
+      descartarOverlayPrint(overlay);
+      U.toast("PDF listo", "success");
+    } catch (err) {
+      console.error("html2pdf error:", err);
+      U.toast("No pude generar el PDF · uso impresión", "warn");
+      imprimirElemento(id);
+    }
+  }
+
+  function construirReporteCompleto(ests, resp, analytics) {
+    const cont = el("div", { id: "rep-completo", class: "rep-completo" });
+    // Portada
+    const portada = el("div", { class: "rep-portada pdf-page" });
+    portada.innerHTML = `
+      <h1>Reporte sociométrico</h1>
+      <h2>${U.escapeHtml(claseSel || "")}</h2>
+      <p class="muted">Generado el ${new Date().toLocaleDateString("es")}</p>
+      <ul class="rep-portada-meta">
+        <li>${ests.length} alumno(s) en la clase</li>
+        <li>${(resp || []).length} respuesta(s) registradas</li>
+        <li>${gruposLocal && gruposLocal.length ? gruposLocal.length + " grupo(s) armados" : "Grupos sin armar"}</li>
+      </ul>
+    `;
+    cont.appendChild(portada);
+
+    const stats = REPORTES.statsPreguntas(preguntas, opciones, resp);
+    const rk = REPORTES.rankings(ests, analytics);
+    const grp = REPORTES.reporteGrupos(ests, gruposLocal, analytics);
+
+    cont.appendChild(REPORTES.renderTablaPreguntas(stats));
+    cont.appendChild(REPORTES.renderRankings(rk));
+    cont.appendChild(REPORTES.renderReporteGrupos(grp));
+
+    // Fichas: una por alumno, ordenadas alfabéticamente.
+    const fichasWrap = el("div", { class: "rep-card" });
+    fichasWrap.innerHTML = `<div class="rep-card-head"><h4>Ficha por alumno</h4></div>`;
+    ests.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+      .forEach((e) => fichasWrap.appendChild(REPORTES.renderFichaAlumno(e, ests, analytics, preguntas)));
+    cont.appendChild(fichasWrap);
+
+    return cont;
+  }
+
+  function imprimirReportesCompletos(ests, resp, analytics) {
+    const reporte = construirReporteCompleto(ests, resp, analytics);
+    const overlay = construirOverlayPrint([reporte]);
+    document.body.classList.add("print-mode");
+    setTimeout(() => {
+      window.print();
+      descartarOverlayPrint(overlay);
+    }, 80);
+  }
+
+  async function descargarPDFReportesCompletos(ests, resp, analytics) {
+    if (typeof window.html2pdf !== "function") {
+      U.toast("Librería PDF no cargada · uso impresión", "warn");
+      imprimirReportesCompletos(ests, resp, analytics);
+      return;
+    }
+    U.toast("Generando PDF (puede tardar unos segundos)…", "info");
+    const reporte = construirReporteCompleto(ests, resp, analytics);
+    const overlay = construirOverlayPrint([reporte]);
+    try {
+      await window.html2pdf().set({
+        margin: [10, 10, 14, 10],
+        filename: `reporte_completo_${(claseSel || "clase").replace(/[^\w\-]+/g, "_")}.pdf`,
+        image: { type: "jpeg", quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        pagebreak: { mode: ["avoid-all", "css", "legacy"] },
+      }).from(overlay).save();
+      U.toast("PDF listo", "success");
+    } catch (err) {
+      console.error("html2pdf error:", err);
+      U.toast("No pude generar el PDF · uso impresión", "warn");
+      window.print();
+    } finally {
+      descartarOverlayPrint(overlay);
+    }
+  }
+
   // ---------- Export a Excel (CSV con BOM) ----------
   // Excel abre CSV nativamente. Usamos UTF-8 con BOM para que las tildes y
   // la ñ no se rompan, y nombramos el archivo con la clase para que sea fácil
@@ -2774,7 +3083,7 @@
     const tieneGrupos = totalGrupos > 0;
     c.innerHTML = `
       <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <h3>4 · Exportar a Excel</h3>
+        <h3>5 · Exportar a Excel</h3>
       </div>
       <p class="muted mt-16">
         Descargá los datos de los alumnos para abrir directamente en Excel: <b>nombre completo</b>, <b>cédula</b> y <b>fecha de nacimiento</b>.

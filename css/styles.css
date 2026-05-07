@@ -1615,3 +1615,452 @@ table.data-table tbody tr:hover { background: #fafafa; }
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   user-select: none;
 }
+
+/* ================================================================
+   POLISH MODERADO — paleta más sobria, tipografía y espaciados
+   consistentes. Se aplica encima de las reglas existentes para no
+   romper componentes ya estilizados.
+   ================================================================ */
+
+:root {
+  --bg-page: #eef2f7;
+  --bg-page-2: #e2e8f0;
+  --ink: #1f2937;
+  --ink-2: #475569;
+  --muted: #64748b;
+  --line: #e5e7eb;
+  --line-strong: #cbd5e1;
+  --accent: #1e3a8a;
+  --accent-2: #2563eb;
+  --ok: #166534;
+  --warn: #b45309;
+  --err: #991b1b;
+  --card: #ffffff;
+}
+
+body {
+  background: linear-gradient(180deg, var(--bg-page) 0%, var(--bg-page-2) 100%);
+  color: var(--ink);
+}
+
+.panel-container {
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 4px 12px rgba(15,23,42,0.04);
+}
+
+.panel-form-title {
+  background: var(--accent);
+  background-image: none;
+  letter-spacing: 0.3px;
+}
+
+h2, h3, h4 { color: var(--ink); }
+.muted { color: var(--muted); }
+
+/* Botones más sobrios y consistentes */
+.btn {
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.05s;
+  box-shadow: 0 1px 1px rgba(15,23,42,0.06);
+  letter-spacing: 0.1px;
+}
+.btn:hover:not(:disabled) {
+  transform: none;
+  box-shadow: 0 2px 6px rgba(15,23,42,0.12);
+}
+.btn        { background: var(--accent); }
+.btn:hover:not(:disabled) { background: #1e3a8a; }
+.btn-blue   { background: var(--accent-2); }
+.btn-blue:hover:not(:disabled)   { background: #1d4ed8; }
+.btn-green  { background: #15803d; }
+.btn-green:hover:not(:disabled)  { background: #166534; }
+.btn-orange { background: #c2410c; }
+.btn-orange:hover:not(:disabled) { background: #9a3412; }
+.btn-red    { background: #b91c1c; }
+.btn-red:hover:not(:disabled)    { background: #991b1b; }
+.btn-gray   { background: #475569; }
+.btn-gray:hover:not(:disabled)   { background: #334155; }
+
+/* Stat boxes más planos */
+.stat-box {
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: none;
+}
+.stat-box .num { color: var(--ink); }
+.stat-verde, .stat-amarillo, .stat-rojo, .stat-blanco {
+  background: var(--card);
+}
+.stat-verde   { border-left: 4px solid #15803d; }
+.stat-amarillo{ border-left: 4px solid #b45309; }
+.stat-rojo    { border-left: 4px solid #b91c1c; }
+.stat-blanco  { border-left: 4px solid #94a3b8; }
+
+/* Badges */
+.badge {
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+.badge-active   { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+.badge-closed   { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+.badge-done     { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.badge-pending  { background: #fffbeb; color: #92400e; border-color: #fde68a; }
+
+input[type="text"], input[type="password"], input[type="email"],
+select, textarea {
+  border-color: var(--line-strong);
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.15);
+}
+label { color: var(--ink-2); }
+
+/* ================================================================
+   REPORTES
+   ================================================================ */
+
+.reportes-panel { background: var(--card); }
+
+.rep-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 16px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.rep-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: var(--ink-2);
+  font-weight: 500;
+  font-size: 0.95em;
+  transition: color 0.15s, border-color 0.15s;
+}
+.rep-tab:hover { color: var(--accent-2); }
+.rep-tab.active {
+  color: var(--accent-2);
+  border-bottom-color: var(--accent-2);
+}
+
+.rep-tabs-body { padding-top: 18px; }
+
+.rep-section { background: transparent; }
+
+.rep-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 12px 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.rep-toolbar-titulo {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 1.05em;
+}
+
+.rep-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.rep-card-head { margin-bottom: 12px; }
+.rep-card-head h4 { margin: 0; }
+.rep-card-head .muted { font-size: 0.85em; }
+
+.rep-pregunta {
+  border-top: 1px solid var(--line);
+  padding: 14px 0 8px 0;
+}
+.rep-pregunta:first-of-type { border-top: none; padding-top: 0; }
+.rep-pregunta-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.rep-pregunta-num {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.85em;
+  padding: 4px 10px;
+  border-radius: 6px;
+  min-width: 36px;
+  text-align: center;
+}
+.rep-pregunta-titulo { font-weight: 600; line-height: 1.35; }
+
+.rep-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+.rep-tabla th, .rep-tabla td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.rep-tabla th {
+  background: #f1f5f9;
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  font-size: 0.78em;
+  letter-spacing: 0.4px;
+}
+.rep-tabla td.num, .rep-tabla th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.rep-bar {
+  width: 100%;
+  height: 8px;
+  background: #f1f5f9;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.rep-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #2563eb);
+  border-radius: 999px;
+}
+.rep-bar-verde   { background: #15803d; }
+.rep-bar-verde-uni { background: #86efac; }
+.rep-bar-amarillo{ background: #ca8a04; }
+.rep-bar-rojo    { background: #b91c1c; }
+.rep-bar-blanco  { background: #94a3b8; }
+
+.rep-otros { margin-top: 8px; font-size: 0.9em; }
+.rep-otros summary { cursor: pointer; color: var(--accent-2); }
+.rep-otros ul { margin: 6px 0 0 18px; }
+
+/* Rankings */
+.rep-rank-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.rep-rank-col {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 4px solid #94a3b8;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.rep-rank-col.rep-rank-verde  { border-left-color: #15803d; }
+.rep-rank-col.rep-rank-rojo   { border-left-color: #b91c1c; }
+.rep-rank-col.rep-rank-blanco { border-left-color: #94a3b8; }
+.rep-rank-titulo { font-weight: 600; margin-bottom: 8px; color: var(--ink); }
+.rep-rank-lista { margin: 0; padding-left: 18px; }
+.rep-rank-lista li {
+  padding: 4px 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px dashed #e5e7eb;
+}
+.rep-rank-lista li:last-child { border-bottom: none; }
+.rep-rank-nombre { color: var(--ink); font-size: 0.92em; }
+.rep-rank-vacio { padding: 8px 0; font-style: italic; }
+
+.rep-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78em;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.rep-pill-verde   { background: #dcfce7; color: #166534; }
+.rep-pill-amarillo{ background: #fef3c7; color: #854d0e; }
+.rep-pill-rojo    { background: #fee2e2; color: #991b1b; }
+.rep-pill-blanco  { background: #f1f5f9; color: #475569; }
+
+/* Fichas */
+.rep-fichas-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.rep-label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.82em;
+  color: var(--ink-2);
+  gap: 4px;
+  min-width: 240px;
+}
+.rep-ficha {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.rep-ficha-titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.rep-ficha-nombre { font-size: 1.15em; font-weight: 700; color: var(--ink); }
+.rep-ficha-resumen { display: flex; flex-wrap: wrap; gap: 4px; }
+.rep-ficha-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 720px) {
+  .rep-ficha-grid { grid-template-columns: 1fr; }
+}
+.rep-ficha-linea {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #e5e7eb;
+  font-size: 0.92em;
+}
+.rep-ficha-linea:last-child { border-bottom: none; }
+.rep-ficha h5 { margin: 4px 0 8px; color: var(--ink-2); font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.5px; }
+.rep-tabla-pregs td:nth-child(2) { width: 50%; }
+
+/* Reporte de grupos */
+.rep-grupo {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.rep-grupo-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.rep-grupo-head h4 { margin: 0; }
+.rep-grupo-meta { color: var(--muted); font-size: 0.9em; }
+.rep-grupo-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+.rep-grupo-bar-lbl {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82em;
+  color: var(--ink-2);
+  margin-bottom: 4px;
+}
+.rep-grupo-alertas {
+  margin-top: 12px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.9em;
+}
+.rep-grupo-alertas ul { margin: 4px 0 0 18px; }
+
+/* ================================================================
+   PRINT — al imprimir esconde todo el dashboard y deja sólo el
+   #print-area que se monta on-demand.
+   ================================================================ */
+@media print {
+  body {
+    background: #fff !important;
+    padding: 0;
+    color: #111;
+  }
+  body.print-mode > *:not(#print-area) { display: none !important; }
+  #print-area { display: block !important; }
+
+  .print-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 2px solid #111;
+    padding-bottom: 6px;
+    margin-bottom: 14px;
+  }
+  .print-titulo { font-size: 1.2em; font-weight: 700; }
+  .print-meta { font-size: 0.8em; color: #555; }
+
+  .pdf-page { page-break-inside: avoid; break-inside: avoid; }
+  .pdf-section { page-break-after: always; }
+  .pdf-section:last-of-type { page-break-after: auto; }
+
+  .rep-card, .rep-grupo, .rep-ficha, .rep-pregunta {
+    box-shadow: none;
+    border-color: #999;
+  }
+  .btn, .rep-toolbar, .rep-tabs, .modal-overlay { display: none !important; }
+  table.rep-tabla { font-size: 0.82em; }
+  .rep-tabla th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .rep-bar-fill { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  a { color: inherit; text-decoration: none; }
+}
+
+/* Fuera del modo impresión, mantenemos #print-area presente pero fuera de
+   pantalla para que html2pdf pueda medir y renderizar (necesita dimensiones
+   reales). En @media print cae en la regla que sí lo muestra. */
+#print-area {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 800px;
+  background: #fff;
+  z-index: -1;
+}
+@media print {
+  #print-area {
+    position: static !important;
+    left: 0 !important;
+    width: auto !important;
+    z-index: auto !important;
+  }
+}
+
+/* Portada del reporte completo */
+.rep-portada {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 32px;
+  margin-bottom: 14px;
+}
+.rep-portada h1 { margin: 0 0 6px; font-size: 1.8em; color: var(--ink); }
+.rep-portada h2 { margin: 0 0 12px; color: var(--accent); font-size: 1.2em; }
+.rep-portada-meta {
+  margin-top: 18px;
+  padding-left: 18px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
