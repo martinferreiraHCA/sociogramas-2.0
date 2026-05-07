@@ -319,6 +319,7 @@
     root.appendChild(renderRanking(esClase, resp));
     root.appendChild(wrapId("paso-respuestas", renderDetalle(esClase, resp)));
     root.appendChild(wrapId("paso-grupos", renderGrupos(esClase, resp)));
+    root.appendChild(wrapId("paso-exportar", renderExportar(esClase)));
   }
 
   function wrapId(id, node) {
@@ -943,6 +944,11 @@
     function construirPlanesImport() {
       const planes = [];
       const soloAct = soloActivos();
+      const aPayload = (r) => ({
+        codigo: r.codigo,
+        nombre: r.nombre,
+        fecha_nacimiento: r.fechaNac || "",
+      });
       if (tieneGrupos) {
         modal.querySelectorAll(".combo-sel").forEach(chk => {
           if (!chk.checked) return;
@@ -953,7 +959,7 @@
           if (!tab) return;
           const rows = combo.rows
             .filter(r => !soloAct || r.activo)
-            .map(r => ({ codigo: r.codigo, nombre: r.nombre }));
+            .map(aPayload);
           if (rows.length) planes.push({ tab, rows });
         });
       } else {
@@ -961,7 +967,7 @@
         if (tab) {
           const rows = filasParseadas
             .filter(r => !soloAct || r.activo)
-            .map(r => ({ codigo: r.codigo, nombre: r.nombre }));
+            .map(aPayload);
           if (rows.length) planes.push({ tab, rows });
         }
       }
@@ -2697,6 +2703,98 @@
     }
     guardarBorrador();
     render();
+  }
+
+  // ---------- Export a Excel (CSV con BOM) ----------
+  // Excel abre CSV nativamente. Usamos UTF-8 con BOM para que las tildes y
+  // la ñ no se rompan, y nombramos el archivo con la clase para que sea fácil
+  // de identificar en la carpeta de descargas.
+  function nombreArchivoExport(prefijo) {
+    const base = (claseSel || "clase").toString().replace(/[^\wÀ-ÿ\-]+/g, "_");
+    const fecha = new Date().toISOString().slice(0, 10);
+    return `${prefijo}_${base}_${fecha}.csv`;
+  }
+
+  function descargarCSVExcel(filename, filas) {
+    // BOM UTF-8 (﻿) para que Excel reconozca acentos y la ñ.
+    const csv = "﻿" + U.objectsToCSV(filas);
+    U.downloadFile(filename, csv, "text/csv;charset=utf-8");
+  }
+
+  function exportarListadoAlumnos(ests) {
+    if (!ests || !ests.length) {
+      U.toast("La clase no tiene alumnos para exportar", "error");
+      return;
+    }
+    const filas = ests.slice()
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"))
+      .map(e => ({
+        "Nombre completo": e.nombre || "",
+        "Cédula": e.codigo || "",
+        "Fecha de nacimiento": e.fecha_nacimiento || "",
+        "Clase": e.clase || claseSel || "",
+      }));
+    descargarCSVExcel(nombreArchivoExport("alumnos"), filas);
+    U.toast(`Listado exportado · ${filas.length} alumno(s)`, "success");
+  }
+
+  function exportarGruposCSV(ests) {
+    if (!gruposLocal || !gruposLocal.length) {
+      U.toast("Todavía no hay grupos armados", "error");
+      return;
+    }
+    const idx = {}; ests.forEach(e => { if (e.codigo) idx[e.codigo] = e; });
+    const filas = [];
+    gruposLocal.forEach((g, i) => {
+      const nombreGrupo = g.nombre || `Grupo ${i + 1}`;
+      (g.codigos || []).forEach(co => {
+        const e = idx[co] || { nombre: co, codigo: co, clase: claseSel, fecha_nacimiento: "" };
+        filas.push({
+          "Equipo": nombreGrupo,
+          "Nombre completo": e.nombre || "",
+          "Cédula": e.codigo || "",
+          "Fecha de nacimiento": e.fecha_nacimiento || "",
+          "Clase": e.clase || claseSel || "",
+        });
+      });
+    });
+    if (!filas.length) {
+      U.toast("Los grupos están vacíos", "error");
+      return;
+    }
+    descargarCSVExcel(nombreArchivoExport("grupos"), filas);
+    U.toast(`Grupos exportados · ${filas.length} alumno(s) en ${gruposLocal.length} equipo(s)`, "success");
+  }
+
+  function renderExportar(ests) {
+    const c = el("div", { class: "panel-container" });
+    const totalEst = ests.length;
+    const totalGrupos = (gruposLocal && gruposLocal.length) || 0;
+    const sinFecha = ests.filter(e => !e.fecha_nacimiento).length;
+    const tieneGrupos = totalGrupos > 0;
+    c.innerHTML = `
+      <div class="flex-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <h3>4 · Exportar a Excel</h3>
+      </div>
+      <p class="muted mt-16">
+        Descargá los datos de los alumnos para abrir directamente en Excel: <b>nombre completo</b>, <b>cédula</b> y <b>fecha de nacimiento</b>.
+        ${tieneGrupos ? "Una vez armados los grupos, también podés exportar la asignación con el nombre del equipo." : "Cuando armes los grupos, vas a poder exportarlos también con el nombre del equipo."}
+      </p>
+      ${sinFecha && totalEst ? `<p class="muted" style="margin-top:6px">⚠️ ${sinFecha}/${totalEst} alumno(s) sin fecha de nacimiento. Importá un CSV que la incluya o completá la columna <b>Fecha de Nacimiento</b> en el tab <b>${U.escapeHtml(claseSel)}</b> de la planilla.</p>` : ""}
+      <div class="flex-row mt-16" style="gap:8px;flex-wrap:wrap">
+        <button class="btn btn-blue" id="btn-export-alumnos" ${totalEst ? "" : "disabled"}>
+          📊 Exportar listado de alumnos${totalEst ? ` (${totalEst})` : ""}
+        </button>
+        <button class="btn btn-green" id="btn-export-grupos" ${tieneGrupos ? "" : "disabled"} title="${tieneGrupos ? "" : "Primero armá los grupos en el paso 3"}">
+          🗂️ Exportar grupos armados${tieneGrupos ? ` (${totalGrupos})` : ""}
+        </button>
+      </div>
+    `;
+    const bA = c.querySelector("#btn-export-alumnos");
+    if (bA && !bA.disabled) bA.addEventListener("click", () => exportarListadoAlumnos(ests));
+    const bG = c.querySelector("#btn-export-grupos");
+    if (bG && !bG.disabled) bG.addEventListener("click", () => exportarGruposCSV(ests));
+    return c;
   }
 
   async function guardarGrupos() {

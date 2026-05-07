@@ -74,7 +74,7 @@ const HEADERS_RESPUESTAS = [
 ];
 const HEADERS_COMPLETADOS = ["codigo", "nombre", "clase", "completado_at"];
 const HEADERS_GRUPOS = ["clase", "nombre_grupo", "codigos", "nombres", "saved_at"];
-const HEADERS_CLASE = ["Nombre", "Código"];
+const HEADERS_CLASE = ["Nombre", "Código", "Fecha de Nacimiento"];
 
 // Caracteres del código generado: alfanumérico sin caracteres ambiguos
 // (sin 0/O/1/I/L) para evitar errores al copiar a mano.
@@ -254,6 +254,7 @@ function crearClase(body) {
   hoja.setFrozenRows(1);
   hoja.setColumnWidth(1, 240);
   hoja.setColumnWidth(2, 120);
+  hoja.setColumnWidth(3, 140);
 
   const nombres = Array.isArray(body.nombres) ? body.nombres : [];
   if (nombres.length) {
@@ -453,6 +454,12 @@ function importarEstudiantes(body) {
   const hoja = obtenerHojaClase(ss, clase, true);
   const cols = mapaColumnasClase(hoja);
 
+  // Si alguna fila trae fecha_nacimiento, garantizamos que la columna exista
+  // antes de empezar a escribir (evita mutar el ancho de la hoja a mitad del
+  // loop y descalibrar los array de filas nuevas).
+  const tieneAlgunaFecha = estudiantes.some((e) => e && String(e.fecha_nacimiento || "").trim());
+  if (tieneAlgunaFecha) asegurarColumnaFechaNac(hoja, cols);
+
   if (modo === "reemplazar") {
     const last = hoja.getLastRow();
     if (last >= 2) hoja.getRange(2, 1, last - 1, hoja.getLastColumn()).clearContent();
@@ -476,6 +483,7 @@ function importarEstudiantes(body) {
   estudiantes.forEach((e) => {
     const codigo = String((e && e.codigo) || "").trim();
     const nombre = String((e && e.nombre) || "").trim();
+    const fechaNac = String((e && e.fecha_nacimiento) || "").trim();
     if (!codigo || !nombre) { invalidos++; return; }
 
     const duenio = usadosGlobal[codigo];
@@ -491,10 +499,19 @@ function importarEstudiantes(body) {
         hoja.getRange(filaExistente, cols.nombre + 1).setValue(nombre);
         actualizados++;
       }
+      // Actualizar fecha_nacimiento sólo si vino y cambió. No pisamos lo
+      // que el docente haya tipeado a mano si esta importación no la trae.
+      if (fechaNac && cols.fechaNac >= 0) {
+        const actualFecha = formatearFechaNac(hoja.getRange(filaExistente, cols.fechaNac + 1).getValue());
+        if (actualFecha !== fechaNac) {
+          hoja.getRange(filaExistente, cols.fechaNac + 1).setValue(fechaNac);
+        }
+      }
     } else {
       const fila = new Array(hoja.getLastColumn() || 2).fill("");
       fila[cols.nombre] = nombre;
       fila[cols.codigo] = codigo;
+      if (fechaNac && cols.fechaNac >= 0) fila[cols.fechaNac] = fechaNac;
       filasNuevas.push(fila);
       mapaExistente[codigo] = -1; // marcar como pendiente
       usadosGlobal[codigo] = clase;
@@ -644,7 +661,8 @@ function leerEstudiantesClase(ss, clase) {
     const nombre = String(v[i][cols.nombre] || "").trim();
     const codigo = String(v[i][cols.codigo] || "").trim();
     if (!nombre) continue;
-    out.push({ codigo, nombre, clase });
+    const fecha_nacimiento = cols.fechaNac >= 0 ? formatearFechaNac(v[i][cols.fechaNac]) : "";
+    out.push({ codigo, nombre, clase, fecha_nacimiento });
   }
   return out;
 }
@@ -737,7 +755,38 @@ function mapaColumnasClase(hoja) {
   if (nombre < 0 || codigo < 0) {
     throw new Error('La hoja "' + hoja.getName() + '" debe tener columnas "Nombre" y "Código".');
   }
-  return { nombre, codigo };
+  // Columna opcional. Aceptamos varias variantes para no romper hojas legacy.
+  let fechaNac = -1;
+  ["fecha de nacimiento", "fecha nacimiento", "fecha de nac.", "fecha nac.", "nacimiento"].some((h) => {
+    const i = headers.indexOf(h);
+    if (i >= 0) { fechaNac = i; return true; }
+    return false;
+  });
+  return { nombre, codigo, fechaNac };
+}
+
+// Agrega la columna "Fecha de Nacimiento" al final de la hoja si no existe
+// y actualiza `cols` in-place. Es idempotente.
+function asegurarColumnaFechaNac(hoja, cols) {
+  if (cols.fechaNac >= 0) return cols.fechaNac;
+  const newPos = (hoja.getLastColumn() || 0) + 1;
+  hoja.getRange(1, newPos).setValue("Fecha de Nacimiento");
+  cols.fechaNac = newPos - 1;
+  return cols.fechaNac;
+}
+
+// Formatea un valor de la celda a string DD/MM/AAAA cuando es Date, o pasa
+// el string limpio. No intenta interpretar formatos exóticos: respeta lo
+// que el docente haya escrito.
+function formatearFechaNac(v) {
+  if (v == null || v === "") return "";
+  if (v instanceof Date) {
+    const dd = String(v.getDate()).padStart(2, "0");
+    const mm = String(v.getMonth() + 1).padStart(2, "0");
+    const yyyy = v.getFullYear();
+    return dd + "/" + mm + "/" + yyyy;
+  }
+  return String(v).trim();
 }
 
 function esHojaReservada(nombre) {

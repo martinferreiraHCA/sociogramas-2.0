@@ -176,6 +176,9 @@
     const iGrupo = firstIdx("grupo");
     const iTipoDoc = firstIdx("tipo de documento");
     const iConPase = firstIdx("con pase");
+    const iFechaNac = ["fecha de nacimiento", "fecha nacimiento", "fecha de nac.", "fecha nac.", "fechanac", "f. nacimiento", "f.nacimiento", "nacimiento"]
+      .map(h => headers.indexOf(h))
+      .find(i => i >= 0);
 
     const vistos = new Set();
     const out = [];
@@ -206,6 +209,9 @@
       if (!nombre) continue;
 
       const conPase = iConPase >= 0 ? String(row[iConPase] || "").trim().toUpperCase() : "";
+      const fechaNac = (iFechaNac != null && iFechaNac >= 0)
+        ? normalizarFechaNac(row[iFechaNac])
+        : "";
       out.push({
         codigo: ci,
         nombre,
@@ -213,10 +219,31 @@
         grupo: iGrupo >= 0 ? String(row[iGrupo] || "").trim() : "",
         tipoDoc,
         conPase,
+        fechaNac,
         activo: conPase !== "SI",
       });
     }
     return { headerIdx, rows: out };
+  }
+
+  // Normaliza una fecha de nacimiento al formato DD/MM/AAAA. Acepta entradas
+  // como "2010-03-21", "21/3/2010", "21-03-10", etc. Si no parsea, devuelve
+  // el string limpio para no perder el dato.
+  function normalizarFechaNac(v) {
+    const raw = String(v == null ? "" : v).trim();
+    if (!raw) return "";
+    const isoMatch = raw.match(/^(\d{4})[\-\/.](\d{1,2})[\-\/.](\d{1,2})/);
+    if (isoMatch) {
+      const [, y, m, d] = isoMatch;
+      return `${d.padStart(2, "0")}/${m.padStart(2, "0")}/${y}`;
+    }
+    const dmyMatch = raw.match(/^(\d{1,2})[\-\/.](\d{1,2})[\-\/.](\d{2,4})/);
+    if (dmyMatch) {
+      let [, d, m, y] = dmyMatch;
+      if (y.length === 2) y = (parseInt(y, 10) > 30 ? "19" : "20") + y;
+      return `${d.padStart(2, "0")}/${m.padStart(2, "0")}/${y}`;
+    }
+    return raw;
   }
 
   function titleCase(s) {
@@ -242,6 +269,6 @@
     $, $$, el,
     parseCSV, csvToObjects, objectsToCSV, downloadFile,
     getQueryParam, escapeHtml, colorOpcionAfinidad,
-    parseRosterEscolar, titleCase,
+    parseRosterEscolar, titleCase, normalizarFechaNac,
   };
 })();
